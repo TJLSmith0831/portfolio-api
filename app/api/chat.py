@@ -2,29 +2,12 @@
 The chat module provides endpoints for interacting with the Ollama-backed LLM.
 """
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
-from app.ollama_client import OllamaClient, OllamaModels
+from app.models.chat_model import ChatRequest, ChatResponse
+from app.ollama_client import OllamaClient, OllamaModels, get_ollama_client
 
 CHAT_ENDPOINT = "/api/chat/"
 
 router = APIRouter(tags=["Chat"])
-
-def get_ollama_client() -> OllamaClient:
-    return OllamaClient()
-
-class ChatRequest(BaseModel):
-    prompt: str = Field(
-        description="Prompt to send to the LLM"
-    )
-    history: list[dict[str, str]] = Field(
-        default=[],
-        description="History of previous interactions"
-    )
-
-class ChatResponse(BaseModel):
-    response: str = Field(
-        description="Model-generated response"
-    )
 
 @router.post("/chat/", response_model=ChatResponse)
 def chat(

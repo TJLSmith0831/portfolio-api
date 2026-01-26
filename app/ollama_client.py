@@ -7,7 +7,6 @@ functions without adding any type constraints that could break
 when the SDK changes.
 """
 
-from dataclasses import dataclass
 import enum
 import os
 from typing import Any
@@ -85,6 +84,15 @@ class OllamaModels(enum.Enum):
     server.
     """
     LLAMA='llama3.2'
+
+
+def get_ollama_client() -> OllamaClient:
+    """
+    Get an instance of the OllamaClient.
+
+    :return: OllamaClient An instance of the OllamaClient.
+    """
+    return OllamaClient()
 
 # Add a main function to test the wrapper's functionality
 if __name__ == "__main__":
