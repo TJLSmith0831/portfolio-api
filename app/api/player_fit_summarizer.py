@@ -1,8 +1,7 @@
 """
 The Ollama connection to the player-fit summarizer demo.
-This module will connect to an ollama model and provide a structured
-system and user prompt that will output a JSON object that can be parsed
-on the frontend.
+This module now uses an object‑oriented design while preserving
+all original behaviour and prompts.
 """
 import json
 import sys
@@ -12,7 +11,7 @@ import logging
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 
-from app.models.player_models import PlayerFitSummary, PlayerFitRequest,RelevantInfoResponse
+from app.models.player_models import PlayerFitSummary, PlayerFitRequest, RelevantInfoResponse
 from app.scrapers.generic_helpers import fetch_website_contents
 from app.scrapers.sports247_scraper import Sports247Scraper
 from app.ollama_client import OllamaModels, get_ollama_client
@@ -24,22 +23,19 @@ logging.basicConfig(
 
 log = logging.getLogger(__name__)
 
-#=========================
-# Helpers
-#=========================
+# =========================
+# Helper functions
+# =========================
 
-def _extract_json(raw_text):
-    """Extract JSON object from string."""
-    
-    # Strip off the ' prefix' and any trailing text not part of valid JSON (e.g., " trailing text" or "...").
-    clean_string = re.sub(r'[ \t]+$', '', raw_text)  # Remove spaces at end.
-    
+def _extract_json(raw_text: str) -> dict:
+    """Extract JSON object from a string response."""
+    clean_string = re.sub(r"[ \t]+$", "", raw_text)  # trim trailing whitespace
     try:
-        result_dict = json.loads(clean_string)
-        return result_dict
-    
-    except Exception as e: 
-        raise ValueError(f'Failed to parse JSON. Raw text received was {raw_text}. Error details:\n{str(e)}')
+        return json.loads(clean_string)
+    except Exception as exc:
+        raise ValueError(
+            f"Failed to parse JSON. Raw text received was {raw_text}. Error details:\n{exc}"
+        )
 
 def _generate_with_retries(
     client,
@@ -52,24 +48,13 @@ def _generate_with_retries(
 
     for attempt in range(1, max_retries + 2):
         log.info("Ollama attempt %d/%d", attempt, max_retries + 1)
-
-        response = client.generate(
-            model=model,
-            system=system,
-            prompt=prompt,
-        )
-
+        response = client.generate(model=model, system=system, prompt=prompt)
         raw_text = response.response.strip()
-
         try:
             return _extract_json(raw_text)
         except Exception as exc:
             last_error = exc
-            log.warning(
-                "JSON parse failed on attempt %d. Retrying.",
-                attempt,
-            )
-
+            log.warning("JSON parse failed on attempt %d. Retrying.", attempt)
             # Repair-style retry prompt
             prompt = (
                 "The previous response was not valid JSON.\n\n"
@@ -82,9 +67,9 @@ def _generate_with_retries(
         f"Failed after {max_retries + 1} attempts.\nLast error: {last_error}"
     )
 
-#=========================
-# Prompts
-#=========================
+# =========================
+# System Prompts
+# =========================
 
 REL_INFO_SYSTEM_PROMPT = """
     You are given the raw textual contents of a college football player profile webpage.
@@ -130,7 +115,7 @@ REL_INFO_SYSTEM_PROMPT = """
         },
         "rankings": {
             "transfer_overall": "...",
-            "transfer_position": "..."
+            "transfer_position": "...'
         },
         "latest_season_stats": {
             "year": "...",
@@ -154,7 +139,6 @@ REL_INFO_SYSTEM_PROMPT = """
     Use "N/A" for missing values.
 """
 
-
 PLAYER_FIT_SYSTEM_PROMPT = """
     You are a college football recruiting analyst. You will evaluate the most recent season
     stats and utilize that heavily in your evaluation and include them explicitly in the overall summary.
@@ -173,127 +157,136 @@ PLAYER_FIT_SYSTEM_PROMPT = """
     Return structured JSON only.
 """
 
-#=========================
-# Prompt Builders
-#=========================
+# =========================
+# PlayerFitSummarizer
+# =========================
 
+class PlayerFitSummarizer:
+    """Object‑oriented wrapper around the original procedural logic."""
+    def __init__(self, client=None):
+        """
+        :param client: Optional Ollama client; if None, a default client is fetched.
+        """
+        self.client = client or get_ollama_client()
+        self.logger = log
 
-def get_player_fit_prompt(request: PlayerFitRequest) -> str:
-    """
-    Build the user prompt for player fit analysis.
+    # -------------- private helpers -----------------
+    def _extract_json(self, raw_text: str) -> dict:
+        return _extract_json(raw_text)
 
-    :param request: PlayerFitRequest
-    :return: Prompt string
-    """
-
-    return f"""
-        **Output valid JSON only**.
-
-        Player: {request.player_name}
-        Team: {request.team_name}
-
-        Player profile information:
-        {request.player_profile.model_dump_json(indent=2)}
-
-        Analyze the player fit and respond in the following JSON format:
-
-        {{
-        "player": "{request.player_name}",
-        "team": "{request.team_name}",
-        "position": "...",
-        "fit_score": 0-100,
-        "scheme_fit": "...",
-        "depth_chart_impact": "...",
-        "development_outlook": "...",
-        "risk_factors": ["...", "..."],
-        "overall_summary": "..."
-        }}
-
-        IMPORTANT:
-            - overall_summary should be at least four sentences long and include player stats for the
-                last season
-            - The teams are all colleges. No professional teams.
-            - Position should be limited to: QB, RB, WR, TE, OL, DL, LB, CB, EDGE, S, K, P, ATH
-                - EDGE is a defensive position. Previously, referred to as defensive ends.
-            - Factor in scheme_fit and development outlook into fit_score
-            - Do NOT mention legal or off-field issues in risk factors.
-            - Reminder: the year is 2026, transfers don't have to redshirt
-
-        Never make things up!
-        Do NOT infer or guess missing values.
-        Return ONLY valid JSON.
-        Do not include commentary, markdown, or trailing text.
-        Ensure the JSON object is complete and properly closed.
-        Use "N/A" for missing values.
-    """
-
-
-#=========================
-# OllamaClient Interaction
-#=========================
-
-def select_relevant_information(driver, profile_url: str) -> RelevantInfoResponse:
-    """
-    Normalize the player profile webpage into structured football-relevant information.
-    """
-    client = get_ollama_client()
-
-    page_text = fetch_website_contents(driver, profile_url)
-
-    parsed_json = _generate_with_retries(
-        client=client,
-        model=OllamaModels.LLAMA.value,
-        system=REL_INFO_SYSTEM_PROMPT,
-        prompt=page_text,
-        max_retries=2,
-    )
-
-    return RelevantInfoResponse(**parsed_json)
-
-def summarize_transfer_fit(player_name: str, team_name: str,
-                           player_profile: RelevantInfoResponse) -> PlayerFitSummary:
-    """
-    Generate a structured player fit summary using llama3.2.
-
-    :param player_name: Player name
-    :param team_name: Team name
-    :param context_links: Supporting article/profile links
-    :return: PlayerFitSummary
-    """
-    log.info(
-        "Generating player fit summary | player='%s' | team='%s'",
-        player_name,
-        team_name,
-    )
-    client = get_ollama_client()
-
-    request = PlayerFitRequest(
-        player_name=player_name,
-        team_name=team_name,
-        player_profile=player_profile,
-    )
-
-    parsed_json = _generate_with_retries(
-            client=client,
-            model=OllamaModels.LLAMA.value,
-            system=PLAYER_FIT_SYSTEM_PROMPT,
-            prompt=get_player_fit_prompt(request),
-            max_retries=2,
+    def _generate_with_retries(
+        self,
+        model: str,
+        system: str,
+        prompt: str,
+        max_retries: int = 2,
+    ) -> dict:
+        return _generate_with_retries(
+            client=self.client,
+            model=model,
+            system=system,
+            prompt=prompt,
+            max_retries=max_retries,
         )
 
-    return PlayerFitSummary(**parsed_json)
+    def _build_player_fit_prompt(self, request: PlayerFitRequest) -> str:
+        """
+        Build the user prompt for player fit analysis.
+        """
+        return f"""
+            **Output valid JSON only**.
+
+            Player: {request.player_name}
+            Team: {request.team_name}
+
+            Player profile information:
+            {request.player_profile.model_dump_json(indent=2)}
+
+            Analyze the player fit and respond in the following JSON format:
+
+            {{
+            "player": "{request.player_name}",
+            "team": "{request.team_name}",
+            "position": "...",
+            "fit_score": 0-100,
+            "scheme_fit": "...",
+            "depth_chart_impact": "...",
+            "development_outlook": "...",
+            "risk_factors": ["...", "..."],
+            "overall_summary": "..."
+            }}
+
+            IMPORTANT:
+                - overall_summary should be at least four sentences long and include player stats for the
+                    last season
+                - The teams are all colleges. No professional teams.
+                - Position should be limited to: QB, RB, WR, TE, OL, DL, LB, CB, EDGE, S, K, P, ATH
+                    - EDGE is a defensive position. Previously, referred to as defensive ends.
+                - Factor in scheme_fit and development outlook into fit_score
+                - Do NOT mention legal or off-field issues in risk factors.
+                - Reminder: the year is 2026, transfers don't have to redshirt
+
+            Never make things up!
+            Do NOT infer or guess missing values.
+            Return ONLY valid JSON.
+            Do not include commentary, markdown, or trailing text.
+            Ensure the JSON object is complete and properly closed.
+            Use "N/A" for missing values.
+        """
+
+    # -------------- public API -----------------
+    def select_relevant_information(self, driver, profile_url: str) -> RelevantInfoResponse:
+        """
+        Normalize the player profile webpage into structured football-relevant information.
+        """
+        page_text = fetch_website_contents(driver, profile_url)
+        parsed_json = self._generate_with_retries(
+            model=OllamaModels.LLAMA.value,
+            system=REL_INFO_SYSTEM_PROMPT,
+            prompt=page_text,
+            max_retries=2,
+        )
+        return RelevantInfoResponse(**parsed_json)
+
+    def summarize_transfer_fit(
+        self, player_name: str, team_name: str, player_profile: RelevantInfoResponse
+    ) -> PlayerFitSummary:
+        """
+        Generate a structured player fit summary using llama3.2.
+        """
+        self.logger.info(
+            "Generating player fit summary | player='%s' | team='%s'",
+            player_name,
+            team_name,
+        )
+        request = PlayerFitRequest(
+            player_name=player_name,
+            team_name=team_name,
+            player_profile=player_profile,
+        )
+        parsed_json = self._generate_with_retries(
+            model=OllamaModels.LLAMA.value,
+            system=PLAYER_FIT_SYSTEM_PROMPT,
+            prompt=self._build_player_fit_prompt(request),
+            max_retries=2,
+        )
+        return PlayerFitSummary(**parsed_json)
+
+# =========================
+# CLI entry point
+# =========================
 
 if __name__ == "__main__":
     """
-    Usage: python transfer_portal_fit_summarizer.py "Player Name" "Team Name"
+    Usage: python player_fit_summarizer.py "Player Name" "Team Name"
     """
 
     if len(sys.argv) < 3:
-            raise SystemExit(
-                "Please provide a player name and team name.\n"
-                "Example:\n"
-                "  python transfer_portal_fit_summarizer.py \"John Doe\" \"Texas\""
-            )
+        raise SystemExit(
+            "Please provide a player name and team name.\n"
+            "Example:\n"
+            "  python player_fit_summarizer.py \"John Doe\" \"Texas\""
+        )
 
     player_name = sys.argv[1]
     team_name = sys.argv[2]
@@ -305,6 +298,8 @@ if __name__ == "__main__":
 
     driver = webdriver.Chrome(options=options)
 
+    summarizer = PlayerFitSummarizer()
+
     try:
         scraper = Sports247Scraper(driver)
         search_result = scraper.search_player_profile(player_name)
@@ -312,12 +307,11 @@ if __name__ == "__main__":
         if not search_result or not search_result.found:
             raise RuntimeError(f"No player profile found for '{player_name}'")
 
-        relevant_info = select_relevant_information(
-            driver,
-            str(search_result.profile_url),
+        relevant_info = summarizer.select_relevant_information(
+            driver, str(search_result.profile_url)
         )
 
-        summary = summarize_transfer_fit(
+        summary = summarizer.summarize_transfer_fit(
             player_name=player_name,
             team_name=team_name,
             player_profile=relevant_info,

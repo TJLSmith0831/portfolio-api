@@ -82,7 +82,8 @@ def test_get_player_fit_prompt_includes_request_details():
         team_name="Example College",
         player_profile=profile,
     )
-    prompt = summarizer.get_player_fit_prompt(request)
+    summarizer_object = summarizer.PlayerFitSummarizer()
+    prompt = summarizer_object._build_player_fit_prompt(request)
     assert "Jane Doe" in prompt
     assert "Example College" in prompt
     assert request.player_profile.model_dump_json(indent=2) in prompt
