@@ -6,8 +6,8 @@ on the frontend.
 """
 import json
 import sys
+import re
 import logging
-from typing_extensions import Any, Dict
 
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -28,22 +28,18 @@ log = logging.getLogger(__name__)
 # Helpers
 #=========================
 
-def _extract_json(text: str) -> Dict[str, Any]:
-    """
-    Extract the first JSON object found in a string.
-    Be tolerant of truncated model output.
-    """
-    start = text.find("{")
-    if start == -1:
-        raise ValueError("No JSON object found in model response")
-
-    candidate = text[start:].strip()
-
-    # Auto-fix common truncation: missing closing brace
-    if candidate.count("{") > candidate.count("}"):
-        candidate += "}"
-
-    return json.loads(candidate)
+def _extract_json(raw_text):
+    """Extract JSON object from string."""
+    
+    # Strip off the ' prefix' and any trailing text not part of valid JSON (e.g., " trailing text" or "...").
+    clean_string = re.sub(r'[ \t]+$', '', raw_text)  # Remove spaces at end.
+    
+    try:
+        result_dict = json.loads(clean_string)
+        return result_dict
+    
+    except Exception as e: 
+        raise ValueError(f'Failed to parse JSON. Raw text received was {raw_text}. Error details:\n{str(e)}')
 
 def _generate_with_retries(
     client,
