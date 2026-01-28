@@ -48,8 +48,22 @@ def _generate_with_retries(
 
     for attempt in range(1, max_retries + 2):
         log.info("Ollama attempt %d/%d", attempt, max_retries + 1)
-        response = client.generate(model=model, system=system, prompt=prompt)
-        raw_text = response.response.strip()
+
+        kwargs = {"model": model, "prompt": prompt}
+        if system is not None:
+            kwargs["system"] = system
+
+        try:
+            response = client.generate(**kwargs)
+        except TypeError:
+            full_prompt = prompt if not system else f"{system}\n\n{prompt}"
+            response = client.generate(model=model, prompt=full_prompt)
+
+        raw_text = getattr(response, "response", None)
+        if raw_text is not None:
+            raw_text = raw_text.strip()
+        else:
+            raw_text = response.choices[0].text.strip()
         try:
             return _extract_json(raw_text)
         except Exception as exc:

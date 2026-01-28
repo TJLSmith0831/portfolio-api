@@ -28,11 +28,13 @@ def chat(
             messages=request.history
         )
 
+        content = result.choices[0].message.content
+
         # Add the LLM response to the history
-        request.history.append({"role": "assistant", "content": result["message"]["content"]})
+        request.history.append({"role": "assistant", "content": content})
 
         return ChatResponse(
-            response=result["message"]["content"]
+            response=content
         )
 
     except Exception as exc:

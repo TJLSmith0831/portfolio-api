@@ -1,0 +1,13 @@
+[x] Open ollama_client.py and remove all imports of the ollama Python SDK
+[x] In ollama_client.py, add an OpenAI client initialized with base_url=http://localhost:11434/v1 and api_key="ollama"
+[x] Replace ollama.chat(...) calls with client.chat.completions.create(...)
+[x] Replace ollama.generate(...) calls with client.completions.create(...) if still used
+[x] Update chat responses to read from response.choices[0].message.content
+[x] Remove pull_model(), delete_model(), and show_model() methods from OllamaClient
+[x] Update is_ollama_running() to call client.models.list()
+[x] Refactor chat_with_tools() to read tool calls from choice.message.tool_calls
+[x] When appending tool results, include tool_call_id in the tool message
+[x] Update __main__ test block to use chat.completions instead of generate()
+[x] Run existing unit tests to confirm no failures after SDK migration
+[x] If tests fail, update mocks or fixtures to reflect OpenAI SDK response shape
+[x] Re-run unit tests until all pass without modification to test intent

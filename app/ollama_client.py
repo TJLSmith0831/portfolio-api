@@ -8,10 +8,13 @@ when the SDK changes.
 """
 
 import enum
+import json
 import os
 from typing import Any
 
-import ollama
+from openai import OpenAI
+
+
 
 class OllamaClient:
     """
@@ -34,32 +37,37 @@ class OllamaClient:
             # variable, so we set it here.
             os.environ["OLLAMA_HOST"] = host
 
+        self.client = OpenAI(
+            base_url="http://localhost:11434/v1",
+            api_key="ollama",
+        )
+
     # --------------------------------------------------------------------- #
     # Direct SDK passthroughs
     # --------------------------------------------------------------------- #
     def list_models(self) -> Any:
-        """Return the raw response from ``ollama.list()``."""
-        return ollama.list()
-
-    def pull_model(self, model_name: str) -> Any:
-        """Pull a model from the Ollama registry."""
-        return ollama.pull(model_name)
-
-    def delete_model(self, model_name: str) -> Any:
-        """Delete a local Ollama model."""
-        return ollama.delete(model_name)
-
-    def show_model(self, model_name: str) -> Any:
-        """Retrieve detailed information about a model."""
-        return ollama.show(model_name)
+        """Return the raw response from ``client.models.list()``."""
+        return self.client.models.list()
 
     def generate(self, *args: Any, **kwargs: Any) -> Any:
-        """Generate text with an Ollama model."""
-        return ollama.generate(*args, **kwargs)
+        """Generate text with an OpenAI completion."""
+        if args:
+            if "model" in kwargs:
+                raise TypeError("generate() received model as both positional and keyword arguments.")
+            if len(args) > 1:
+                raise TypeError("generate() accepts at most one positional argument.")
+            kwargs["model"] = args[0]
+        return self.client.completions.create(**kwargs)
 
     def chat(self, *args: Any, **kwargs: Any) -> Any:
         """Run a chat‑style completion."""
-        return ollama.chat(*args, **kwargs)
+        if args:
+            if "model" in kwargs:
+                raise TypeError("chat() received model as both positional and keyword arguments.")
+            if len(args) > 1:
+                raise TypeError("chat() accepts at most one positional argument.")
+            kwargs["model"] = args[0]
+        return self.client.chat.completions.create(**kwargs)
 
     def embeddings(self, *args: Any, **kwargs: Any) -> Any:
         """Generate embeddings for a prompt."""
@@ -71,10 +79,77 @@ class OllamaClient:
     def is_ollama_running(self) -> bool:
         """Check whether the Ollama server is reachable."""
         try:
-            ollama.list()
+            self.client.models.list()
             return True
         except Exception:
             return False
+
+    def chat_with_tools(self, *args: Any, **kwargs: Any) -> Any:
+        """
+        Send a chat request that may include tool calls.
+        Handles any returned tool_calls and feeds the result back.
+        """
+        response = self.chat(*args, **kwargs)
+
+        messages = kwargs.get("messages")
+        if not messages:
+            return response
+
+        choices = getattr(response, "choices", [])
+        if not choices:
+            return response
+
+        first_choice = choices[0]
+        message = getattr(first_choice, "message", None)
+        if not message:
+            return response
+
+        tool_calls = getattr(message, "tool_calls", None)
+        if tool_calls:
+            for call in tool_calls:
+                function = getattr(call, "function", None)
+                name = getattr(function, "name", None) if function else None
+                raw_arguments = getattr(function, "arguments", {}) if function else {}
+                if isinstance(raw_arguments, str):
+                    try:
+                        arguments = json.loads(raw_arguments)
+                    except json.JSONDecodeError:
+                        arguments = {}
+                elif isinstance(raw_arguments, dict):
+                    arguments = raw_arguments
+                else:
+                    arguments = {}
+
+                result = self.call_tool(
+                    name=name,
+                    arguments=arguments,
+                )
+
+                messages.append({
+                    "role": "tool",
+                    "name": name,
+                    "content": result,
+                    "tool_call_id": getattr(call, "id", None),
+                })
+
+            response = self.chat(*args, **kwargs)
+
+        return response
+
+
+    def call_tool(self, name: str, arguments: dict) -> str:
+        """
+        Call a tool with the given name and arguments.
+        """
+        return "I've used a tool!"
+        # if name == "get_ticket_price":
+        #     city = arguments.get("destination_city")
+        #     price_details = get_ticket_price(city)
+        #     return json.dumps(price_details)
+
+        # raise ValueError(f"Unknown tool: {name}")
+
+
 
 class OllamaModels(enum.Enum):
     """
@@ -98,7 +173,10 @@ def get_ollama_client() -> OllamaClient:
 if __name__ == "__main__":
     client = OllamaClient()
     print(client.is_ollama_running())
-    test_prompt="Hello, world!"
+    test_prompt = "Hello, world!"
     print(f"Testing '{OllamaModels.LLAMA.value}' model with: '{test_prompt}'")
-    response = client.generate(OllamaModels.LLAMA.value, prompt=test_prompt)
-    print(response.response)
+    response = client.chat(
+        model=OllamaModels.LLAMA.value,
+        messages=[{"role": "user", "content": test_prompt}],
+    )
+    print(response.choices[0].message.content)
