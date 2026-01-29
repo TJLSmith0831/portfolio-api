@@ -8,9 +8,9 @@ import sys
 import re
 import logging
 
-from fastapi.param_functions import Depends
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 
 from fastapi import APIRouter
 
@@ -372,11 +372,17 @@ def summarize_player_fit(request: PlayerFitSummaryRequest,
     team_name = request.requested_team_name
 
     options = Options()
-    options.add_argument("--headless")
-    options.add_argument("--disable-gpu")
+    options.binary_location = "/usr/bin/chromium"
+    
+    options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
-
-    driver = webdriver.Chrome(options=options)
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--window-size=1920,1080")
+    
+    service = Service("/usr/bin/chromedriver")
+    
+    driver = webdriver.Chrome(service=service, options=options)
 
     client = LLMClient(model=model)
 
