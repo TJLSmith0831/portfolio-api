@@ -43,7 +43,7 @@ class PlayerFitSummary(BaseModel):
     scheme_fit: str
     depth_chart_impact: str
     development_outlook: str
-    risk_factors: List[str]
+    risk_factors: List[Optional[str]]
     overall_summary: str
 
     def __str__(self) -> str:

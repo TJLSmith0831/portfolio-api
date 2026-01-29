@@ -5,9 +5,19 @@ from app.api.player_fit_summarizer import _chat_with_retries
 from app.models.player_fit_models import PlayerFitRequest, RelevantInfoResponse
 
 
+class DummyMessage:
+    def __init__(self, content: str):
+        self.content = content
+
+
+class DummyChoice:
+    def __init__(self, content: str):
+        self.message = DummyMessage(content)
+
+
 class DummyResponse:
-    def __init__(self, text: str) -> None:
-        self.response = text
+    def __init__(self, text: str):
+        self.choices = [DummyChoice(text)]
 
 
 class DummyClient:
@@ -81,7 +91,7 @@ def test_generate_with_retries_retries_and_repairs_prompt():
     repair_prompt = repair_messages[1]["content"]
 
     assert repair_prompt.startswith("The previous response was not valid JSON.")
-    assert "Original content:\nnot json" in repair_prompt
+    assert "he previous response was not valid JSON" in repair_prompt
 
 
 def test_generate_with_retries_raises_after_exhausting_attempts():

@@ -44,6 +44,31 @@ def _extract_json(raw_text: str) -> dict:
             f"Failed to parse JSON. Raw text received was {raw_text}. Error details:\n{exc}"
         )
 
+def _parse_json_lenient(text: str) -> dict:
+    """
+    Parse JSON from LLM output.
+    Repairs common LLM failure modes:
+      - missing closing braces
+      - trailing whitespace
+    """
+    text = text.strip()
+
+    # Fast path
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # ---- Repair: balance braces ----
+    open_braces = text.count("{")
+    close_braces = text.count("}")
+
+    if open_braces > close_braces:
+        text = text + ("}" * (open_braces - close_braces))
+
+    return json.loads(text)
+
+
 def _chat_with_retries(
     client,
     model: str,
@@ -57,12 +82,8 @@ def _chat_with_retries(
         log.info("Ollama attempt %d/%d", attempt, max_retries + 1)
 
         chat_messages = []
-
         if system:
-            chat_messages.append(
-                {"role": "system", "content": system}
-            )
-
+            chat_messages.append({"role": "system", "content": system})
         chat_messages.extend(messages)
 
         try:
@@ -75,28 +96,26 @@ def _chat_with_retries(
             log.warning("Chat call failed on attempt %d: %s", attempt, exc)
             continue
 
-        # ---- extract text ----
-        raw_text = getattr(response, "response", None)
-        if raw_text is None:
-            raw_text = response.choices[0].message.content
-
-        raw_text = raw_text.strip()
+        # ---- Extract raw text (Ollama-safe) ----
+        raw_text = response.choices[0].message.content.strip()
+        log.debug("Raw LLM output:\n%s", raw_text)
 
         try:
-            return _extract_json(raw_text)
+            return _parse_json_lenient(raw_text)
         except Exception as exc:
             last_error = exc
-            log.warning("JSON parse failed on attempt %d. Retrying.", attempt)
+            log.warning("JSON parse failed on attempt %d: %s", attempt, exc)
 
-            # Repair prompt becomes the *next user message*
+            # ---- Repair prompt only if retrying ----
             messages = [
                 {
                     "role": "user",
                     "content": (
                         "The previous response was not valid JSON.\n\n"
-                        "Return ONLY a complete, valid JSON object matching the schema.\n"
-                        "Do not include explanations, comments, or markdown.\n\n"
-                        f"Original content:\n{raw_text}"
+                        "Return ONLY a complete, valid JSON object.\n"
+                        "Do not include markdown, comments, or explanations.\n"
+                        "Use null for unknown values.\n\n"
+                        f"Previous response:\n{raw_text}"
                     ),
                 }
             ]
@@ -104,6 +123,24 @@ def _chat_with_retries(
     raise RuntimeError(
         f"Failed after {max_retries + 1} attempts. Last error: {last_error}"
     )
+
+def _normalize_player_fit_json(data: dict) -> dict:
+    """
+    Ensure all required PlayerFitSummary fields exist with safe defaults.
+    This guarantees Pydantic validation will not fail due to missing keys.
+    """
+    return {
+        "player": data.get("player"),
+        "team": data.get("team"),
+        "position": data.get("position"),
+        "fit_score": data.get("fit_score", 0),
+        "scheme_fit": data.get("scheme_fit") or "No scheme fit was provided.",
+        "depth_chart_impact": data.get("depth_chart_impact") or "No depth chart impact was provided.",
+        "development_outlook": data.get("development_outlook") or "No development outlook was provided.",
+        "risk_factors": data.get("risk_factors") or [],
+        "overall_summary": data.get("overall_summary")
+            or "No detailed summary was generated based on the available information.",
+    }
 
 # =========================
 # System Prompts
@@ -261,7 +298,8 @@ class PlayerFitSummarizer:
             Return ONLY valid JSON.
             Do not include commentary, markdown, or trailing text.
             Ensure the JSON object is complete and properly closed.
-            Use "N/A" for missing values.
+            Use null for missing values.
+            All fields MUST be present in the JSON object.
         """
 
     # -------------- public API -----------------
@@ -311,7 +349,9 @@ class PlayerFitSummarizer:
             messages=messages,
             max_retries=2,
         )
-        return PlayerFitSummary(**parsed_json)
+        normalized = _normalize_player_fit_json(parsed_json)
+        return PlayerFitSummary(**normalized)
+
 
 # =========================
 # API entry point
