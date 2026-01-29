@@ -2,40 +2,57 @@
 The chat module provides endpoints for interacting with the Ollama-backed LLM.
 """
 from fastapi import APIRouter, Depends, HTTPException
-from app.models.chat_model import ChatRequest, ChatResponse
-from app.ollama_client import OllamaClient, OllamaModels, get_ollama_client
+from fastapi.responses import StreamingResponse
+from app.models.chat_model import ChatRequest
+from app.ollama_client import LLMClient, OllamaModels, get_llm_client
 
-CHAT_ENDPOINT = "/api/chat/"
+CHAT_ENDPOINT = "/chat"
 
 router = APIRouter(tags=["Chat"])
 
-@router.post("/chat/", response_model=ChatResponse)
-def chat(
-    request: ChatRequest,
-    client: OllamaClient = Depends(get_ollama_client),
-) -> ChatResponse:
-    try:
-        # Ensure the history does not exceed 10 messages
-        if len(request.history) >= 10:
-            return ChatResponse(response="History limit reached")
+@router.post("/chat")
+def chat(request: ChatRequest, client: LLMClient = Depends(get_llm_client)) -> StreamingResponse:
+    """
+    Endpoint for interacting with the Ollama-backed LLM.
 
-        # Add the new user message to the history
-        request.history.append({"role": "user", "content": request.prompt})
+    :param request: The chat request containing the user's prompt and conversation history.
+    :param client: The Ollama client instance.
+    :return: The chat response containing the LLM's response.
+    """
 
-        # Call the Ollama client with the updated conversation history
-        result = client.chat(
-            model=OllamaModels.LLAMA.value,
-            messages=request.history
+    if len(request.history) >= 10:
+        return StreamingResponse(
+            iter(["History limit reached"]),
+            media_type="text/plain",
         )
 
-        content = result.choices[0].message.content
+    request.history.append({"role": "user", "content": request.prompt})
 
-        # Add the LLM response to the history
-        request.history.append({"role": "assistant", "content": content})
+    def token_generator():
+        try:
+            stream = client.chat(
+                model=OllamaModels.LLAMA.value,
+                messages=request.history,
+                stream=True,
+            )
 
-        return ChatResponse(
-            response=content
-        )
+            full_content = ""
 
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+            for chunk in stream:
+                delta = (
+                    getattr(chunk.choices[0].delta, "content", None)
+                    if hasattr(chunk.choices[0], "delta")
+                    else getattr(chunk, "response", None)
+                )
+                if delta:
+                    full_content += delta
+                    yield delta
+
+            request.history.append(
+                {"role": "assistant", "content": full_content}
+            )
+
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc))
+
+    return StreamingResponse(token_generator(), media_type="text/plain")

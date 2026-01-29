@@ -8,13 +8,16 @@ import sys
 import re
 import logging
 
+from fastapi.param_functions import Depends
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 
-from app.models.player_models import PlayerFitSummary, PlayerFitRequest, RelevantInfoResponse
+from fastapi import APIRouter
+
+from app.models.player_fit_models import PlayerFitSummary, PlayerFitRequest, PlayerFitSummaryRequest, PlayerFitSummaryResponse, RelevantInfoResponse
 from app.scrapers.generic_helpers import fetch_website_contents
 from app.scrapers.sports247_scraper import Sports247Scraper
-from app.ollama_client import OllamaModels, get_ollama_client
+from app.ollama_client import OllamaModels, get_llm_client, LLMClient
 
 logging.basicConfig(
     level=logging.INFO,
@@ -22,6 +25,10 @@ logging.basicConfig(
 )
 
 log = logging.getLogger(__name__)
+
+SUMMARIZER_ENDPOINT = "/summarize_player_fit"
+
+router = APIRouter(tags=["Summarize Player Fit"])
 
 # =========================
 # Helper functions
@@ -37,11 +44,11 @@ def _extract_json(raw_text: str) -> dict:
             f"Failed to parse JSON. Raw text received was {raw_text}. Error details:\n{exc}"
         )
 
-def _generate_with_retries(
+def _chat_with_retries(
     client,
     model: str,
-    system: str,
-    prompt: str,
+    system: str | None,
+    messages: list[dict],
     max_retries: int = 2,
 ) -> dict:
     last_error = None
@@ -49,36 +56,53 @@ def _generate_with_retries(
     for attempt in range(1, max_retries + 2):
         log.info("Ollama attempt %d/%d", attempt, max_retries + 1)
 
-        kwargs = {"model": model, "prompt": prompt}
-        if system is not None:
-            kwargs["system"] = system
+        chat_messages = []
+
+        if system:
+            chat_messages.append(
+                {"role": "system", "content": system}
+            )
+
+        chat_messages.extend(messages)
 
         try:
-            response = client.generate(**kwargs)
-        except TypeError:
-            full_prompt = prompt if not system else f"{system}\n\n{prompt}"
-            response = client.generate(model=model, prompt=full_prompt)
+            response = client.chat(
+                model=model,
+                messages=chat_messages,
+            )
+        except Exception as exc:
+            last_error = exc
+            log.warning("Chat call failed on attempt %d: %s", attempt, exc)
+            continue
 
+        # ---- extract text ----
         raw_text = getattr(response, "response", None)
-        if raw_text is not None:
-            raw_text = raw_text.strip()
-        else:
-            raw_text = response.choices[0].text.strip()
+        if raw_text is None:
+            raw_text = response.choices[0].message.content
+
+        raw_text = raw_text.strip()
+
         try:
             return _extract_json(raw_text)
         except Exception as exc:
             last_error = exc
             log.warning("JSON parse failed on attempt %d. Retrying.", attempt)
-            # Repair-style retry prompt
-            prompt = (
-                "The previous response was not valid JSON.\n\n"
-                "Return ONLY a complete, valid JSON object matching the schema.\n"
-                "Do not include explanations, comments, or markdown.\n\n"
-                f"Original content:\n{raw_text}"
-            )
+
+            # Repair prompt becomes the *next user message*
+            messages = [
+                {
+                    "role": "user",
+                    "content": (
+                        "The previous response was not valid JSON.\n\n"
+                        "Return ONLY a complete, valid JSON object matching the schema.\n"
+                        "Do not include explanations, comments, or markdown.\n\n"
+                        f"Original content:\n{raw_text}"
+                    ),
+                }
+            ]
 
     raise RuntimeError(
-        f"Failed after {max_retries + 1} attempts.\nLast error: {last_error}"
+        f"Failed after {max_retries + 1} attempts. Last error: {last_error}"
     )
 
 # =========================
@@ -150,7 +174,10 @@ REL_INFO_SYSTEM_PROMPT = """
     Return ONLY valid JSON.
     Do not include commentary, markdown, or trailing text.
     Ensure the JSON object is complete and properly closed.
-    Use "N/A" for missing values.
+    Output valid JSON only.
+    Do not use N/A, undefined, or comments.
+    Use null for unknown values.
+    Do not wrap the response in Markdown or code fences.
 """
 
 PLAYER_FIT_SYSTEM_PROMPT = """
@@ -169,6 +196,10 @@ PLAYER_FIT_SYSTEM_PROMPT = """
     Be concise, analytical, and realistic.
     Avoid hype. Use football terminology.
     Return structured JSON only.
+    Output valid JSON only.
+    Do not use N/A, undefined, or comments.
+    Use null for unknown values.
+    Do not wrap the response in Markdown or code fences.
 """
 
 # =========================
@@ -181,27 +212,12 @@ class PlayerFitSummarizer:
         """
         :param client: Optional Ollama client; if None, a default client is fetched.
         """
-        self.client = client or get_ollama_client()
+        self.client = client or get_llm_client()
         self.logger = log
 
     # -------------- private helpers -----------------
     def _extract_json(self, raw_text: str) -> dict:
         return _extract_json(raw_text)
-
-    def _generate_with_retries(
-        self,
-        model: str,
-        system: str,
-        prompt: str,
-        max_retries: int = 2,
-    ) -> dict:
-        return _generate_with_retries(
-            client=self.client,
-            model=model,
-            system=system,
-            prompt=prompt,
-            max_retries=max_retries,
-        )
 
     def _build_player_fit_prompt(self, request: PlayerFitRequest) -> str:
         """
@@ -254,17 +270,21 @@ class PlayerFitSummarizer:
         Normalize the player profile webpage into structured football-relevant information.
         """
         page_text = fetch_website_contents(driver, profile_url)
-        parsed_json = self._generate_with_retries(
+        messages = [
+            {"role": "user", "content": page_text}
+        ]
+
+        parsed_json = _chat_with_retries(
+            client=self.client,
             model=OllamaModels.LLAMA.value,
             system=REL_INFO_SYSTEM_PROMPT,
-            prompt=page_text,
+            messages=messages,
             max_retries=2,
         )
         return RelevantInfoResponse(**parsed_json)
 
-    def summarize_transfer_fit(
-        self, player_name: str, team_name: str, player_profile: RelevantInfoResponse
-    ) -> PlayerFitSummary:
+    def summarize_transfer_fit(self, player_name: str, team_name: str,
+                               player_profile: RelevantInfoResponse) -> PlayerFitSummary:
         """
         Generate a structured player fit summary using llama3.2.
         """
@@ -278,13 +298,72 @@ class PlayerFitSummarizer:
             team_name=team_name,
             player_profile=player_profile,
         )
-        parsed_json = self._generate_with_retries(
+        messages = [
+            {
+                "role": "user",
+                "content": self._build_player_fit_prompt(request),
+            }
+        ]
+        parsed_json = _chat_with_retries(
+            client=self.client,
             model=OllamaModels.LLAMA.value,
             system=PLAYER_FIT_SYSTEM_PROMPT,
-            prompt=self._build_player_fit_prompt(request),
+            messages=messages,
             max_retries=2,
         )
         return PlayerFitSummary(**parsed_json)
+
+# =========================
+# API entry point
+# =========================
+
+@router.post("/summarize_player_fit", response_model=PlayerFitSummaryResponse)
+def summarize_player_fit(request: PlayerFitSummaryRequest,
+                         model: OllamaModels = OllamaModels.LLAMA) -> PlayerFitSummaryResponse:
+    """
+    Generate a structured player fit summary using llama3.2.
+
+    :param request: The player fit summary request containing the player's name and team name.
+    :param model: The Ollama model to use for generating the summary.
+    :return: The player fit summary response containing the structured summary.
+    """
+    # Use the incoming request fields instead of sys.argv
+    player_name = request.player_name
+    team_name = request.requested_team_name
+
+    options = Options()
+    options.add_argument("--headless")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--no-sandbox")
+
+    driver = webdriver.Chrome(options=options)
+
+    client = LLMClient(model=model)
+
+    summarizer = PlayerFitSummarizer(client=client)
+
+    try:
+        scraper = Sports247Scraper(driver)
+        search_result = scraper.search_player_profile(player_name)
+
+        if not search_result or not search_result.found:
+            raise RuntimeError(f"No player profile found for '{player_name}'")
+
+        relevant_info = summarizer.select_relevant_information(
+            driver, str(search_result.profile_url)
+        )
+
+        summary = summarizer.summarize_transfer_fit(
+            player_name=player_name,
+            team_name=team_name,
+            player_profile=relevant_info,
+        )
+
+        return PlayerFitSummaryResponse(summary=summary)
+
+    finally:
+        driver.quit()
+
 
 # =========================
 # CLI entry point

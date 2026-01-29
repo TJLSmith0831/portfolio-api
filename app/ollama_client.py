@@ -15,8 +15,17 @@ from typing import Any
 from openai import OpenAI
 
 
+class OllamaModels(enum.Enum):
+    """
+    This `OllamaModels` enum provides a set of predefined model names that
+    can be used with the Ollama client. Each member of the enum is associated
+    with a specific model identifier as it might be recognized by the Ollama
+    server.
+    """
+    LLAMA='llama3.2'
 
-class OllamaClient:
+
+class LLMClient:
     """
     Thin wrapper around the Ollama Python SDK.
 
@@ -25,10 +34,12 @@ class OllamaClient:
     concrete API shape.
     """
 
-    def __init__(self, host: str | None = None) -> None:
+    def __init__(self, model: OllamaModels = OllamaModels.LLAMA, host: str | None = None) -> None:
         """
         Configure the SDK host.
 
+        :param model: Optional Ollama model name (e.g., "llama3.2").
+                      If omitted, the SDK uses its default.
         :param host: Optional Ollama host URL (e.g., "http://localhost:11434").
                      If omitted, the SDK uses its default.
         """
@@ -41,6 +52,7 @@ class OllamaClient:
             base_url="http://localhost:11434/v1",
             api_key="ollama",
         )
+        self.model = model.value
 
     # --------------------------------------------------------------------- #
     # Direct SDK passthroughs
@@ -49,19 +61,9 @@ class OllamaClient:
         """Return the raw response from ``client.models.list()``."""
         return self.client.models.list()
 
-    def generate(self, *args: Any, **kwargs: Any) -> Any:
-        """Generate text with an OpenAI completion."""
-        if args:
-            if "model" in kwargs:
-                raise TypeError("generate() received model as both positional and keyword arguments.")
-            if len(args) > 1:
-                raise TypeError("generate() accepts at most one positional argument.")
-            kwargs["model"] = args[0]
-        return self.client.completions.create(**kwargs)
-
     def chat(self, *args: Any, **kwargs: Any) -> Any:
         """Run a chat‑style completion."""
-        if args:
+        if len(args) > 0:
             if "model" in kwargs:
                 raise TypeError("chat() received model as both positional and keyword arguments.")
             if len(args) > 1:
@@ -71,7 +73,7 @@ class OllamaClient:
 
     def embeddings(self, *args: Any, **kwargs: Any) -> Any:
         """Generate embeddings for a prompt."""
-        return ollama.embeddings(*args, **kwargs)
+        return self.client.embeddings.create(*args, **kwargs)
 
     # --------------------------------------------------------------------- #
     # Helper utilities
@@ -137,7 +139,7 @@ class OllamaClient:
         return response
 
 
-    def call_tool(self, name: str, arguments: dict) -> str:
+    def call_tool(self, name: Any, arguments: dict) -> str:
         """
         Call a tool with the given name and arguments.
         """
@@ -150,28 +152,17 @@ class OllamaClient:
         # raise ValueError(f"Unknown tool: {name}")
 
 
-
-class OllamaModels(enum.Enum):
-    """
-    This `OllamaModels` enum provides a set of predefined model names that
-    can be used with the Ollama client. Each member of the enum is associated
-    with a specific model identifier as it might be recognized by the Ollama
-    server.
-    """
-    LLAMA='llama3.2'
-
-
-def get_ollama_client() -> OllamaClient:
+def get_llm_client(model: OllamaModels = OllamaModels.LLAMA) -> LLMClient:
     """
     Get an instance of the OllamaClient.
 
     :return: OllamaClient An instance of the OllamaClient.
     """
-    return OllamaClient()
+    return LLMClient(model=model)
 
 # Add a main function to test the wrapper's functionality
 if __name__ == "__main__":
-    client = OllamaClient()
+    client = LLMClient()
     print(client.is_ollama_running())
     test_prompt = "Hello, world!"
     print(f"Testing '{OllamaModels.LLAMA.value}' model with: '{test_prompt}'")

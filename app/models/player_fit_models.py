@@ -1,5 +1,5 @@
 
-from typing_extensions import List, Optional, Dict, Any
+from typing_extensions import List, Optional, Dict, Any, Union
 from pydantic import BaseModel, Field, HttpUrl
 
 class RelevantLink(BaseModel):
@@ -11,9 +11,9 @@ class RelevantInfoResponse(BaseModel):
     identity: Optional[Dict[str, Any]] = None
     school_context: Optional[Dict[str, Any]] = None
     rankings: Optional[Dict[str, Any]] = None
-    latest_season_stats: Optional[Dict[str, Any]] = None
+    latest_season_stats: Optional[Union[Dict[str, Any], str]] = None
     background: Optional[Dict[str, Any]] = None
-    notable_headlines: List[Dict[str, Any]] = []
+    notable_headlines: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class PlayerSearchResult(BaseModel):
@@ -64,3 +64,10 @@ class PlayerFitSummary(BaseModel):
             f"Overall Summary:\n"
             f"{self.overall_summary}"
         )
+        
+class PlayerFitSummaryRequest(BaseModel):
+    player_name: str
+    requested_team_name: str
+        
+class PlayerFitSummaryResponse(BaseModel):
+    summary: PlayerFitSummary
