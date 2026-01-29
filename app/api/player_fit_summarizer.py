@@ -380,7 +380,7 @@ def summarize_player_fit(request: PlayerFitSummaryRequest,
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920,1080")
     
-    service = Service("/usr/bin/chromium-driver")
+    service = Service("/usr/bin/chromedriver")
     
     driver = webdriver.Chrome(service=service, options=options)
 
