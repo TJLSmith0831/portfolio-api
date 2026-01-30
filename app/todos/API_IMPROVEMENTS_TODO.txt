@@ -21,6 +21,7 @@ LLM client reuse + model pinning
 [ ] In _chat_with_retries, add:
     - temperature=0
     - max_tokens=500 (tune per response size)
+[ ] Migrate to job-based framework to improve latency and handle multiple requests at once.
 
 Start Ollama inside the container + keep warm
 --------------------------------------------
