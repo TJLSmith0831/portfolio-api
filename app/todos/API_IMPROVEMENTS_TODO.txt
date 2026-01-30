@@ -1,0 +1,72 @@
+TODO.txt — Speed up /summarize_player_fit + add timing logs
+====================================================
+
+Driver + concurrency
+--------------------
+[ ] Create app/scrapers/driver_singleton.py with:
+    - a module-level Playwright driver singleton
+    - a module-level threading.Lock()
+    - get_driver() that initializes Chrome only once
+[ ] In summarize_player_fit endpoint:
+    - delete per-request webdriver.Chrome(...) creation
+    - delete driver.quit() in finally
+    - replace with: driver = get_driver()
+    - wrap ALL selenium usage in: with driver_lock:
+[ ] Ensure you run uvicorn with ONE worker (no --workers > 1).
+
+LLM client reuse + model pinning
+-------------------------------
+[ ] Pin model tag: change OllamaModels.LLAMA from "llama3.2" / ":latest" to "llama3.2:1b" (or ":3b" if you must).
+[ ] Create a singleton LLMClient (don’t instantiate inside the request handler).
+[ ] In _chat_with_retries, add:
+    - temperature=0
+    - max_tokens=500 (tune per response size)
+
+Start Ollama inside the container + keep warm
+--------------------------------------------
+[ ] Add /app/entrypoint.sh that:
+    - starts `ollama serve` in background
+    - pulls your pinned model (ollama pull llama3.2:1b)
+    - then starts uvicorn
+[ ] In Dockerfile:
+    - COPY entrypoint.sh and chmod +x
+    - switch CMD to run /app/entrypoint.sh
+[ ] Add env vars in Dockerfile (or runtime):
+    - OLLAMA_KEEP_ALIVE=10m
+    - OLLAMA_NUM_PARALLEL=1
+    - OLLAMA_MAX_LOADED_MODELS=1
+[ ] Add a FastAPI startup warmup call (1 tiny chat) so first request isn’t slow.
+
+Add timing logs (measure before/after each change)
+--------------------------------------------------
+[ ] Create app/utils/timing.py:
+
+    import time, logging
+    from contextlib import contextmanager
+    log = logging.getLogger("timing")
+
+    @contextmanager
+    def timed(label: str, extra: dict | None = None):
+        t0 = time.perf_counter()
+        try:
+            yield
+        finally:
+            ms = (time.perf_counter() - t0) * 1000
+            log.info("TIMING | %s | %.1f ms | %s", label, ms, extra or {})
+
+[ ] Add req_id + timers in summarize_player_fit:
+    - request_total
+    - selenium_search
+    - selenium_fetch_profile
+    - llm_extract_relevant
+    - llm_generate_summary
+
+Optional (big win)
+------------------
+[ ] Collapse the two LLM calls into one (extract+fit in a single response) if still slow.
+[ ] Rename ollama_client.py into llm_client.py.
+
+Done criteria
+-------------
+[ ] Run 5 warm requests and record median + p95 from logs.
+[ ] Confirm first request after restart is close to warm request time (warmup + keepalive working).
