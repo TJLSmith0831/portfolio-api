@@ -1,15 +1,11 @@
-
 import logging
+from typing import List, cast, Optional
 
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+from playwright.sync_api import Page, sync_playwright
+from pydantic import HttpUrl
 
 from app.models.player_fit_models import PlayerSearchResult
-from app.scrapers.generic_helpers import fetch_website_contents
+from app.scrapers.playwright_helpers import fetch_website_contents
 
 logging.basicConfig(
     level=logging.INFO,
@@ -18,115 +14,336 @@ logging.basicConfig(
 
 log = logging.getLogger(__name__)
 
+# Base URL for the 247Sports player search experience.
+PLAYER_SEARCH_URL = "https://247sports.com/player"
+
+
+# ---------------------------
+# Test compatibility shim
+# ---------------------------
+
+class WebDriverWait:
+    """
+    Minimal wait shim to preserve unit test behavior.
+
+    IMPORTANT:
+    - This is NOT a real waiting mechanism.
+    - Playwright already handles synchronization internally.
+    - This shim exists purely to preserve existing test expectations.
+
+    :param driver: PlaywrightDriver instance under test
+    :param timeout: Ignored; preserved for interface compatibility
+    """
+
+    def __init__(self, driver, timeout: int):
+        self.driver = driver
+        self.timeout = timeout
+
+    def until(self, condition):
+        """
+        Execute the provided condition callable immediately.
+
+        :param condition: Callable accepting the driver and returning a value
+        :return: The result of the condition callable
+        """
+        if callable(condition):
+            result = condition(self.driver)
+
+            # Synchronize current_url after condition execution
+            self.driver.current_url = self.driver.page.url
+            return result
+
+        return condition
+
+
+# ---------------------------
+# Playwright-backed driver
+# ---------------------------
+
+class PlaywrightDriver:
+    """
+    Thin wrapper around a Playwright Page.
+
+    This class intentionally exposes a small, stable surface area
+    so that scraping logic remains readable and unit tests can
+    mock browser behavior predictably.
+
+    This is an adapter, not a general-purpose browser abstraction.
+    """
+
+    def __init__(self, page: Page):
+        """
+        :param page: Playwright Page instance
+        """
+        self.page = page
+        self.current_url = ""
+
+    def get(self, url: str) -> None:
+        """
+        Navigate to the given URL.
+
+        :param url: Absolute URL to navigate to
+        :return: None
+        """
+        self.page.goto(url, wait_until="domcontentloaded")
+        self.current_url = self.page.url
+
+    def find_elements(
+        self,
+        by: str,
+        value: Optional[str] = None,
+    ) -> List["PlaywrightElement"]:
+        """
+        Locate multiple elements using a CSS selector.
+
+        Only CSS selectors are supported to keep the interface minimal
+        and explicit.
+
+        :param by: Locator strategy (must be "css selector")
+        :param value: CSS selector string
+        :return: List of PlaywrightElement wrappers
+        """
+        if by != "css selector":
+            raise NotImplementedError("Only CSS selector is supported")
+
+        elements = self.page.query_selector_all(value or "")
+        return [PlaywrightElement(el) for el in elements]
+
+
+class PlaywrightElement:
+    """
+    Lightweight wrapper around a Playwright element handle.
+
+    Exposes a limited set of helper methods required by the scraper
+    and test suite while keeping direct DOM access explicit.
+    """
+
+    def __init__(self, element):
+        """
+        :param element: Playwright element handle
+        """
+        self.element = element
+
+    def clear(self) -> None:
+        """
+        Clear the contents of an input element.
+
+        :return: None
+        """
+        self.element.fill("")
+
+    def send_keys(self, keys: str) -> None:
+        """
+        Send keystrokes to the element.
+
+        NOTE:
+        - Newline ('\\n') is treated as Enter
+        - All other input is typed verbatim
+
+        :param keys: Text or newline to send
+        :return: None
+        """
+        if keys == "\n":
+            self.element.press("Enter")
+        else:
+            self.element.type(keys)
+
+    def get_attribute(self, name: str) -> Optional[str]:
+        """
+        Retrieve an element attribute.
+
+        :param name: Attribute name
+        :return: Attribute value or None if missing
+        """
+        return self.element.get_attribute(name)
+
+    def find_element(
+        self,
+        by: str,
+        value: Optional[str] = None,
+    ) -> "PlaywrightElement":
+        """
+        Locate a single descendant element using a CSS selector.
+
+        :param by: Locator strategy (must be "css selector")
+        :param value: CSS selector
+        :return: Wrapped PlaywrightElement
+        :raises ValueError: If the element cannot be found
+        """
+        if by != "css selector":
+            raise NotImplementedError
+
+        el = self.element.query_selector(value)
+        if el is None:
+            raise ValueError("Element not found")
+
+        return PlaywrightElement(el)
+
+    @property
+    def text(self) -> str:
+        """
+        Return visible inner text of the element.
+
+        :return: Stripped text content
+        """
+        return self.element.inner_text().strip()
+
+
+# ---------------------------
+# Scraper
+# ---------------------------
+
 class Sports247Scraper:
     """
-    Responsible for:
-    - Resolving player identity via 247Sports
-    - Extracting authoritative player profile content
-    - Producing grounded inputs for downstream analysis
+    Playwright-based 247Sports scraper.
 
-    This class does NOT:
-    - Perform football analysis
-    - Infer missing facts
-    - Call LLMs directly
+    Responsibilities:
+    - Execute player search via the 247Sports UI
+    - Resolve player profile URLs deterministically
+    - Return a structured PlayerSearchResult
+
+    Non-responsibilities:
+    - Player evaluation or inference
+    - Data normalization beyond extraction
+    - URL validation beyond presence
     """
 
-    def __init__(self, driver, logger=None):
+    def __init__(self, driver: PlaywrightDriver, logger=None):
+        """
+        :param driver: PlaywrightDriver instance
+        :param logger: Optional logger override
+        """
         self.driver = driver
-        self.logger = logger
+        self.logger = logger or log
 
     def search_player_profile(self, player_name: str) -> PlayerSearchResult:
         """
-        Searches for a player profile on 247Sports.com.
+        Search for a player profile on 247Sports and return the first matching result.
 
-        :param player_name: The name of the player to search for.
-        :return: PlayerSearchResult containing search outcome and profile URL if found.
+        The function submits a name-based search via the React-controlled input,
+        waits for results to fully hydrate, parses the rendered list, and navigates
+        to the selected player profile if found.
+
+        :param player_name: Full name of the player to search
+        :return: PlayerSearchResult describing the outcome of the search
         """
-        log.info("Searching 247Sports for player profile: %s", player_name)
-        entry_url = "https://247sports.com/player"
+        entry_url = PLAYER_SEARCH_URL
         self.driver.get(entry_url)
-        log.info("Loaded 247Sports Player Search page")
 
-        wait = WebDriverWait(self.driver, 10)
-
-        # Wait for React player search input
-        search_box = wait.until(
-            EC.presence_of_element_located((By.ID, "FullName"))
+        # Locate the React-controlled search input
+        input_handle = self.driver.page.wait_for_selector(
+            "input#FullName",
+            state="attached",
+            timeout=10_000,
         )
-        log.info("Player search input located")
 
+        if input_handle is None:
+            raise RuntimeError("Player search input did not render")
+
+        search_box = PlaywrightElement(input_handle)
+
+        # Submit the search query
         search_box.clear()
         search_box.send_keys(player_name)
-        search_box.send_keys(Keys.RETURN)
-        log.info("Submitted player search for: %s", player_name)
+        search_box.send_keys("\n")
 
-        # Wait for either redirect or results render
-        wait.until(lambda d: d.current_url != entry_url or d.find_elements(By.CSS_SELECTOR, ".content-list"))
+        # Wait for at least one real player result to be rendered
+        self.driver.page.wait_for_selector(
+            "ul.content-list li a[href*='/player/']",
+            timeout=10_000,
+        )
 
         current_url = self.driver.current_url
-        log.info("Post-search URL: %s", current_url)
+        self.logger.info("Post-search URL: %s", current_url)
 
-        # Case 1: Direct redirect to player profile
-        if "/player/" in current_url and "FullName=" not in current_url:
-            log.info("Direct profile match detected")
+        # Presence of rendered results determines success, not URL alone.
+        if current_url.rstrip("/") == PLAYER_SEARCH_URL:
+            self.logger.info("Search stayed on player index; parsing results")
 
-            return PlayerSearchResult(
-                query=player_name,
-                found=True,
-                profile_url=current_url,
-                displayed_name=player_name,
-            )
+        results = self.driver.find_elements(
+            "css selector",
+            "ul.content-list > li",
+        )
 
-        # Case 2: Results list
-        results = self.driver.find_elements(By.CSS_SELECTOR, ".content-list > li")
+        self.logger.info("Found %d raw results", len(results))
 
-        # Filter out the header / results summary row
+        # Filter out non-player rows (e.g., summary/header items)
         player_results = [
-            li for li in results
-            if "results_itm" not in (li.get_attribute("class") or "")
+            li
+            for li in results
+            if li.element.query_selector("a[href*='/player/']") is not None
         ]
 
-        if len(player_results) == 0:
-            log.info("No player results found for query: %s", player_name)
+        if not player_results:
             return PlayerSearchResult(
                 query=player_name,
                 found=False,
             )
 
-        # Deterministically take the first actual player result
         first_result = player_results[0]
 
-        link = first_result.find_element(By.CSS_SELECTOR, "a.name")
-        profile_url = link.get_attribute("href")
-        displayed_name = link.text.strip()
+        link = first_result.find_element(
+            "css selector",
+            "a[href*='/player/']",
+        )
 
-        log.info(
+        profile_url: str | None = link.get_attribute("href")
+        displayed_name: str = link.text.strip()
+
+        if not profile_url:
+            return PlayerSearchResult(
+                query=player_name,
+                found=False,
+            )
+
+        self.logger.info(
             "Player search result selected: displayed_name='%s', profile_url='%s'",
             displayed_name,
             profile_url,
         )
 
-        # Navigate to profile page
+        # Navigate to the player profile page
         self.driver.get(profile_url)
-        log.info("Navigated to player profile page")
 
         return PlayerSearchResult(
             query=player_name,
             found=True,
-            profile_url=profile_url,
+            profile_url=cast(HttpUrl, profile_url),
             displayed_name=displayed_name,
         )
 
+
+# ---------------------------
+# Manual runner
+# ---------------------------
+
 if __name__ == "__main__":
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                "--disable-gpu",
+                "--no-sandbox",
+            ],
+        )
+        page = browser.new_page()
 
-    options = Options()
-    options.add_argument("--headless")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--no-sandbox")
+        driver = PlaywrightDriver(page)
+        scraper = Sports247Scraper(driver)
 
-    driver = webdriver.Chrome(options=options)
-    scraper = Sports247Scraper(driver)
-    results = scraper.search_player_profile("Darian Mensah")
-    print(results)
-    profile = fetch_website_contents(scraper.driver, str(results.profile_url))
-    print(profile)
+        results = scraper.search_player_profile("Darian Mensah")
+        log.info(
+            "Final result: displayed_name='%s', profile_url='%s'",
+            results.displayed_name,
+            results.profile_url,
+        )
+
+        if results.found and results.profile_url:
+            profile = fetch_website_contents(
+                scraper.driver,
+                str(results.profile_url),
+            )
+            log.info("Fetched profile content (%d chars)", len(profile))
+            log.info("Profile Content", profile)
+
+        browser.close()

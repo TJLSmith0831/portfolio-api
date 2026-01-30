@@ -1,101 +1,100 @@
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-
-from app.scrapers.sports247_scraper import Sports247Scraper
+from app.scrapers.sports247_scraper import Sports247Scraper, PlaywrightElement
 from app.models.player_fit_models import PlayerSearchResult
 
 
 @pytest.fixture
-def mock_driver():
+def mock_page():
+    """
+    Mock Playwright Page object.
+    """
+    page = MagicMock()
+    page.url = "https://247sports.com/player"
+    return page
+
+
+@pytest.fixture
+def mock_driver(mock_page):
+    """
+    Mock PlaywrightDriver with a mocked Page.
+    """
     driver = MagicMock()
+    driver.page = mock_page
     driver.current_url = "https://247sports.com/player"
-    driver.find_elements.return_value = []
     return driver
 
 
 @pytest.fixture
 def scraper(mock_driver):
+    """
+    Sports247Scraper instance using mocked PlaywrightDriver.
+    """
     return Sports247Scraper(driver=mock_driver)
 
 
-@patch("app.scrapers.sports247_scraper.WebDriverWait")
-def test_direct_profile_redirect(mock_wait_cls, scraper, mock_driver):
-    mock_wait = MagicMock()
-    mock_wait_cls.return_value = mock_wait
-
-    search_input = MagicMock()
-
-    # First wait: search box
-    # Second wait: redirect condition satisfied
-    mock_wait.until.side_effect = [
-        search_input,
-        True,
-    ]
-
-    # Simulate redirect BEFORE scraper checks current_url
-    mock_driver.current_url = "https://247sports.com/player/darian-mensah-46116055/"
-
-    result = scraper.search_player_profile("Darian Mensah")
-
-    assert result.found is True
-    assert str(result.profile_url) == mock_driver.current_url
-    assert result.displayed_name == "Darian Mensah"
-
-    search_input.clear.assert_called_once()
-    search_input.send_keys.assert_any_call("Darian Mensah")
-    search_input.send_keys.assert_any_call(Keys.RETURN)
-
-
-@patch("app.scrapers.sports247_scraper.WebDriverWait")
-def test_no_search_results(mock_wait_cls, scraper, mock_driver):
+def test_no_search_results(scraper, mock_driver, mock_page):
     """
-    Case 2:
-    Search results page loads but no player rows exist
+    Case:
+    - Search input exists
+    - Results container renders
+    - No player rows are found
     """
-    mock_wait = MagicMock()
-    mock_wait_cls.return_value = mock_wait
 
-    search_input = MagicMock()
-    mock_wait.until.side_effect = [
-        search_input,  # search box
-        True,          # wait for results render
+    input_handle = MagicMock()
+    mock_page.wait_for_selector.side_effect = [
+        input_handle,  # input#FullName
+        None,          # results selector
     ]
 
     mock_driver.find_elements.return_value = []
 
     result = scraper.search_player_profile("Nonexistent Player")
 
+    assert isinstance(result, PlayerSearchResult)
     assert result.found is False
     assert result.profile_url is None
     assert result.displayed_name is None
 
 
-@patch("app.scrapers.sports247_scraper.WebDriverWait")
-def test_results_list_selects_first_player(mock_wait_cls, scraper, mock_driver):
-    mock_wait = MagicMock()
-    mock_wait_cls.return_value = mock_wait
+def test_results_list_selects_first_player(scraper, mock_driver, mock_page):
+    """
+    Case:
+    - Multiple <li> rows
+    - Only one contains a player link
+    - First valid player is selected
+    """
 
-    search_input = MagicMock()
-    mock_wait.until.side_effect = [
-        search_input,
-        True,
+    # Mock search input
+    input_handle = MagicMock()
+    mock_page.wait_for_selector.side_effect = [
+        input_handle,  # input#FullName
+        MagicMock(),   # results selector
     ]
 
-    header_li = MagicMock()
-    header_li.get_attribute.return_value = "results_itm"
+    # Header row (no player link)
+    header_el = MagicMock()
+    header_el.query_selector.return_value = None
 
-    player_li = MagicMock()
-    player_li.get_attribute.return_value = ""
+    header_li = PlaywrightElement(header_el)
 
-    link = MagicMock()
-    link.get_attribute.return_value = "https://247sports.com/player/john-doe-999/"
-    link.text = "John Doe"
+    # Player row
+    player_el = MagicMock()
+    player_el.query_selector.return_value = MagicMock()
 
-    player_li.find_element.return_value = link
-    mock_driver.find_elements.return_value = [header_li, player_li]
+    link_el = MagicMock()
+    link_el.get_attribute.return_value = "https://247sports.com/player/john-doe-999/"
+    link_el.inner_text.return_value = "John Doe"
+
+    player_el.query_selector.return_value = link_el
+
+    player_li = PlaywrightElement(player_el)
+
+    mock_driver.find_elements.return_value = [
+        header_li,
+        player_li,
+    ]
 
     result = scraper.search_player_profile("John Doe")
 
@@ -106,25 +105,28 @@ def test_results_list_selects_first_player(mock_wait_cls, scraper, mock_driver):
     mock_driver.get.assert_any_call("https://247sports.com/player/john-doe-999/")
 
 
-@patch("app.scrapers.sports247_scraper.WebDriverWait")
-def test_results_list_ignores_header_rows(mock_wait_cls, scraper, mock_driver):
+def test_results_list_ignores_non_player_rows(scraper, mock_driver, mock_page):
     """
-    Ensures rows with 'results_itm' class are ignored
+    Case:
+    - Results render
+    - Rows exist but none contain player links
     """
-    mock_wait = MagicMock()
-    mock_wait_cls.return_value = mock_wait
 
-    search_input = MagicMock()
-    mock_wait.until.side_effect = [
-        search_input,
-        True,
+    input_handle = MagicMock()
+    mock_page.wait_for_selector.side_effect = [
+        input_handle,  # input#FullName
+        MagicMock(),   # results selector
     ]
 
-    header_only = MagicMock()
-    header_only.get_attribute.return_value = "results_itm"
+    non_player_el = MagicMock()
+    non_player_el.query_selector.return_value = None
 
-    mock_driver.find_elements.return_value = [header_only]
+    non_player_li = PlaywrightElement(non_player_el)
+
+    mock_driver.find_elements.return_value = [non_player_li]
 
     result = scraper.search_player_profile("Some Player")
 
     assert result.found is False
+    assert result.profile_url is None
+    assert result.displayed_name is None
