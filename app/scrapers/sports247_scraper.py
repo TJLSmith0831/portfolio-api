@@ -7,7 +7,6 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from pydantic import HttpUrl
 
 from app.models.player_fit_models import PlayerSearchResult
 from app.scrapers.generic_helpers import fetch_website_contents
