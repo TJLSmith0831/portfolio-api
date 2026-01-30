@@ -4,7 +4,7 @@ The chat module provides endpoints for interacting with the Ollama-backed LLM.
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from app.models.chat_model import ChatRequest
-from app.ollama_client import LLMClient, OllamaModels, get_llm_client
+from app.llm_client import LLMClient, OllamaModels, get_llm_client
 
 CHAT_ENDPOINT = "/chat"
 

@@ -15,9 +15,9 @@ from selenium.webdriver.chrome.service import Service
 from fastapi import APIRouter
 
 from app.models.player_fit_models import PlayerFitSummary, PlayerFitRequest, PlayerFitSummaryRequest, PlayerFitSummaryResponse, RelevantInfoResponse
-from app.scrapers.generic_helpers import fetch_website_contents
+from app.scrapers.selenium_helpers import fetch_website_contents
 from app.scrapers.sports247_scraper import Sports247Scraper
-from app.ollama_client import OllamaModels, get_llm_client, LLMClient
+from app.llm_client import OllamaModels, get_llm_client, LLMClient
 
 logging.basicConfig(
     level=logging.INFO,

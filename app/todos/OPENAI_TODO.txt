@@ -1,5 +1,5 @@
-[x] Open ollama_client.py and remove all imports of the ollama Python SDK
-[x] In ollama_client.py, add an OpenAI client initialized with base_url=http://localhost:11434/v1 and api_key="ollama"
+[x] Open llm_client.py and remove all imports of the ollama Python SDK
+[x] In llm_client.py, add an OpenAI client initialized with base_url=http://localhost:11434/v1 and api_key="ollama"
 [x] Replace ollama.chat(...) calls with client.chat.completions.create(...)
 [x] Replace ollama.generate(...) calls with client.completions.create(...) if still used
 [x] Update chat responses to read from response.choices[0].message.content
