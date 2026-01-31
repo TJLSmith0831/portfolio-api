@@ -6,7 +6,7 @@ services:
     image: portfolio-api
     ports:
       - "8000:8000"
-      - "11434:11434"
+      - "11435:11434"
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
