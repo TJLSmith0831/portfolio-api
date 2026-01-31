@@ -1,37 +1,153 @@
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+import json
+import logging
+
+log = logging.getLogger(__name__)
 
 
 def fetch_website_contents(driver, url: str) -> str:
     """
-    Return the title and visible text contents of the website at the given URL.
-    Truncate to 2,000 characters.
+    Extract high-signal, football-relevant content from a 247Sports player page.
+
+    Strategy:
+    1. Load page and wait for hydration
+    2. Parse application/ld+json for canonical identity data
+    3. Extract text from section.main-content.full only
+    4. Return a compact, LLM-ready text payload
 
     Expects a PlaywrightDriver-compatible interface.
     """
-    driver.get(url)
+    log.info("Fetching website contents: %s", url)
 
-    page = driver.page  # Access underlying Playwright Page
+    driver.get(url)
+    page = driver.page
 
     try:
-        page.wait_for_selector("body", timeout=10_000)
+        log.info("Waiting for page network idle")
+        page.wait_for_load_state("networkidle", timeout=15_000)
+
+        log.info("Waiting for main content container")
+        page.wait_for_selector("section.main-content.full", timeout=15_000)
     except PlaywrightTimeoutError:
-        return "No title found\n\n"
+        log.warning("Timed out waiting for main content container")
+        return "No usable content found."
 
-    title = page.title() or "No title found"
+    parts: list[str] = []
 
-    # Remove irrelevant elements
-    page.evaluate(
-        """
-        () => {
-            ['script', 'style', 'img', 'input'].forEach(tag => {
-                document.querySelectorAll(tag).forEach(el => el.remove());
-            });
-        }
-        """
+    # --------------------------------------------------
+    # 1. Canonical structured data (ld+json)
+    # --------------------------------------------------
+    try:
+        log.info("Extracting structured ld+json data")
+        ld_json_nodes = page.locator('script[type="application/ld+json"]')
+
+        for i in range(ld_json_nodes.count()):
+            raw = ld_json_nodes.nth(i).text_content()
+            if not raw:
+                continue
+
+            data = json.loads(raw)
+
+            if isinstance(data, dict) and data.get("@type") == "Person":
+                log.info("Found Person structured data")
+
+                parts.append("=== PLAYER IDENTITY ===")
+                parts.append(f"Name: {data.get('name')}")
+
+                affiliation = data.get("affiliation", {})
+                if isinstance(affiliation, dict):
+                    parts.append(f"Affiliation: {affiliation.get('name')}")
+
+                height = (
+                    data.get("height", [{}])[0].get("value")
+                    if isinstance(data.get("height"), list)
+                    else None
+                )
+                weight = (
+                    data.get("weight", [{}])[0].get("value")
+                    if isinstance(data.get("weight"), list)
+                    else None
+                )
+
+                if height:
+                    parts.append(f"Height: {height}")
+                if weight:
+                    parts.append(f"Weight: {weight}")
+
+                break
+    except Exception as exc:
+        log.warning("Failed extracting structured data: %s", exc)
+
+    # --------------------------------------------------
+    # 2. Main semantic content only
+    # --------------------------------------------------
+    try:
+        log.info("Cleaning noisy DOM elements inside main content")
+        page.evaluate(
+            """
+            () => {
+                const container = document.querySelector('section.main-content.full');
+                if (!container) return;
+                ['script', 'style', 'img', 'svg', 'iframe', 'input', 'button']
+                  .forEach(tag => {
+                    container.querySelectorAll(tag).forEach(el => el.remove());
+                  });
+            }
+            """
+        )
+
+        log.info("Extracting textContent from main content container")
+        main_text = page.evaluate(
+            """
+            () => {
+                const el = document.querySelector('section.main-content.full');
+                return el ? el.textContent : '';
+            }
+            """
+        ).strip()
+
+        if main_text:
+            parts.append("\n=== PROFILE CONTENT ===")
+            parts.append(main_text)
+            log.info("Main content extracted (%d chars)", len(main_text))
+        else:
+            log.warning("Main content container found but empty")
+
+    except Exception as exc:
+        log.warning("Failed extracting main content text: %s", exc)
+
+    combined = "\n\n".join(parts)
+    log.info("Final extracted payload size: %d chars", len(combined))
+
+    return combined[:2_500]
+
+
+if __name__ == "__main__":
+    from playwright.sync_api import sync_playwright
+    from app.scrapers.sports247_scraper import PlaywrightDriver
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     )
 
-    text = page.inner_text("body").strip()
+    TEST_URL = "https://247sports.com/player/darian-mensah-46116055/"
 
-    combined = f"{title}\n\n{text}"
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=False,
+            args=["--no-sandbox", "--disable-gpu"],
+        )
+        page = browser.new_page()
+        driver = PlaywrightDriver(page)
 
-    return combined[:2_000]
+        try:
+            contents = fetch_website_contents(driver, TEST_URL)
+
+            print("==== EXTRACTED PAGE CONTENT ====")
+            print(contents)
+            print("\n==== CHARACTER COUNT ====")
+            print(len(contents))
+
+        finally:
+            browser.close()

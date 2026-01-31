@@ -11,12 +11,12 @@ Driver + concurrency
     - delete per-request webdriver.Chrome(...) creation
     - delete driver.quit() in finally
     - replace with: driver = get_driver()
-    - wrap ALL selenium usage in: with driver_lock:
+    - wrap ALL playwright usage in: with driver_lock:
 [ ] Ensure you run uvicorn with ONE worker (no --workers > 1).
 
 LLM client reuse + model pinning
 -------------------------------
-[ ] Pin model tag: change OllamaModels.LLAMA from "llama3.2" / ":latest" to "llama3.2:1b" (or ":3b" if you must).
+[X] Pin model tag: change OllamaModels.LLAMA from "llama3.2" / ":latest" to "llama3.2:1b" (or ":3b" if you must).
 [ ] Create a singleton LLMClient (don’t instantiate inside the request handler).
 [ ] In _chat_with_retries, add:
     - temperature=0
@@ -40,32 +40,50 @@ Start Ollama inside the container + keep warm
 
 Add timing logs (measure before/after each change)
 --------------------------------------------------
-[ ] Create app/utils/timing.py:
+[ ] Create app/utils/timing.py and add to API relevant paths
 
-    import time, logging
-    from contextlib import contextmanager
+    import time
+    import logging
+    from functools import wraps
+    
     log = logging.getLogger("timing")
+    
+    
+    def timed(label: str | None = None, extra: dict | None = None):
+        """
+        Decorator to log execution time of a function.
+    
+        :param label: Optional label override. Defaults to function name.
+        :param extra: Optional metadata dict to log.
+        """
+        def decorator(func):
+            name = label or func.__qualname__
+    
+            @wraps(func)
+            def wrapper(*args, **kwargs):
+                t0 = time.perf_counter()
+                try:
+                    return func(*args, **kwargs)
+                finally:
+                    ms = (time.perf_counter() - t0) * 1000
+                    log.info(
+                        "TIMING | %s | %.1f ms | %s",
+                        name,
+                        ms,
+                        extra or {},
+                    )
+    
+            return wrapper
+    
+        return decorator
 
-    @contextmanager
-    def timed(label: str, extra: dict | None = None):
-        t0 = time.perf_counter()
-        try:
-            yield
-        finally:
-            ms = (time.perf_counter() - t0) * 1000
-            log.info("TIMING | %s | %.1f ms | %s", label, ms, extra or {})
 
-[ ] Add req_id + timers in summarize_player_fit:
-    - request_total
-    - selenium_search
-    - selenium_fetch_profile
-    - llm_extract_relevant
-    - llm_generate_summary
+[ ] Add req_id + timers in summarize_player_fit
 
 Optional (big win)
 ------------------
 [ ] Collapse the two LLM calls into one (extract+fit in a single response) if still slow.
-[ ] Rename ollama_client.py into llm_client.py.
+[X] Rename ollama_client.py into llm_client.py.
 
 Done criteria
 -------------

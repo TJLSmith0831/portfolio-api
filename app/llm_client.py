@@ -22,7 +22,8 @@ class OllamaModels(enum.Enum):
     with a specific model identifier as it might be recognized by the Ollama
     server.
     """
-    LLAMA='llama3.2'
+    LLAMA_LATEST='llama3.2'
+    LLAMA_SMALL='llama3.2:1b'
 
 
 class LLMClient:
@@ -34,7 +35,7 @@ class LLMClient:
     concrete API shape.
     """
 
-    def __init__(self, model: OllamaModels = OllamaModels.LLAMA, host: str | None = None) -> None:
+    def __init__(self, model: OllamaModels = OllamaModels.LLAMA_LATEST, host: str | None = None) -> None:
         """
         Configure the SDK host.
 
@@ -152,7 +153,7 @@ class LLMClient:
         # raise ValueError(f"Unknown tool: {name}")
 
 
-def get_llm_client(model: OllamaModels = OllamaModels.LLAMA) -> LLMClient:
+def get_llm_client(model: OllamaModels = OllamaModels.LLAMA_LATEST) -> LLMClient:
     """
     Get an instance of the OllamaClient.
 
@@ -165,9 +166,9 @@ if __name__ == "__main__":
     client = LLMClient()
     print(client.is_ollama_running())
     test_prompt = "Hello, world!"
-    print(f"Testing '{OllamaModels.LLAMA.value}' model with: '{test_prompt}'")
+    print(f"Testing '{OllamaModels.LLAMA_LATEST.value}' model with: '{test_prompt}'")
     response = client.chat(
-        model=OllamaModels.LLAMA.value,
+        model=OllamaModels.LLAMA_LATEST.value,
         messages=[{"role": "user", "content": test_prompt}],
     )
     print(response.choices[0].message.content)

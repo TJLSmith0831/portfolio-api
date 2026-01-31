@@ -31,7 +31,7 @@ def chat(request: ChatRequest, client: LLMClient = Depends(get_llm_client)) -> S
     def token_generator():
         try:
             stream = client.chat(
-                model=OllamaModels.LLAMA.value,
+                model=OllamaModels.LLAMA_LATEST.value,
                 messages=request.history,
                 stream=True,
             )
