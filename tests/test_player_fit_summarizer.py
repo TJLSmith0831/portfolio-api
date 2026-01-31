@@ -25,15 +25,12 @@ class DummyClient:
         self._responses = list(responses)
         self.calls = []
 
-    def chat(self, *, model, messages):
-        self.calls.append(
-            {
-                "model": model,
-                "messages": messages,
-            }
-        )
+    def chat(self, **kwargs):
+        self.calls.append(kwargs)
+    
         if not self._responses:
             raise AssertionError("No more responses configured for DummyClient.")
+    
         return DummyResponse(self._responses.pop(0))
 
 
