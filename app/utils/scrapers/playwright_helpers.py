@@ -184,26 +184,38 @@ def fetch_website_contents(driver, url: str) -> str:
     Extract high-signal, football-relevant content from a 247Sports player page.
 
     Strategy:
-    1. Load page and wait for hydration
-    2. Parse application/ld+json for canonical identity data
-    3. Extract text from section.main-content.full only
-    4. Return a compact, LLM-ready text payload
+    1. Navigate to page (DOM ready only)
+    2. Wait for main semantic container
+    3. Extract canonical structured data
+    4. Extract cleaned main text content
+    5. Return compact, LLM-ready payload
 
-    Expects a PlaywrightDriver-compatible interface.
+    :param driver: PlaywrightDriver-compatible wrapper
+    :param url: Fully qualified player profile URL
+    :return: Normalized textual content for LLM ingestion
     """
     log.info("Fetching website contents: %s", url)
 
-    driver.get(url)
     page = driver.page
 
-    try:
-        log.info("Waiting for page network idle")
-        page.wait_for_load_state("networkidle", timeout=15_000)
+    # Cold-start-safe navigation
+    page.goto(url, wait_until="domcontentloaded")
 
-        log.info("Waiting for main content container")
-        page.wait_for_selector("section.main-content.full", timeout=15_000)
-    except PlaywrightTimeoutError:
-        raise PlaywrightTimeoutError("Timed out waiting for main content container")
+    # Retry selector wait once to absorb cold start
+    for attempt in range(2):
+        try:
+            log.info("Waiting for main content container (attempt %d)", attempt + 1)
+            page.wait_for_selector(
+                "section.main-content.full",
+                timeout=20_000,
+            )
+            break
+        except PlaywrightTimeoutError:
+            if attempt == 1:
+                raise PlaywrightTimeoutError(
+                    "Timed out waiting for main content container"
+                )
+            log.warning("Main container not ready, retrying once")
 
     parts: list[str] = []
 
@@ -279,12 +291,12 @@ def fetch_website_contents(driver, url: str) -> str:
             """
         ).strip()
 
-        if main_text:
-            parts.append("\n=== PROFILE CONTENT ===")
-            parts.append(main_text)
-            log.info("Main content extracted (%d chars)", len(main_text))
-        else:
+        if not main_text:
             raise ValueError("Main content container found but empty")
+
+        parts.append("\n=== PROFILE CONTENT ===")
+        parts.append(main_text)
+        log.info("Main content extracted (%d chars)", len(main_text))
 
     except Exception as exc:
         raise ValueError(f"Failed extracting main content text: {exc}")
