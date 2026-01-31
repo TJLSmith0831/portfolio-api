@@ -1,12 +1,12 @@
 import logging
-from typing import List, cast, Optional
+from typing import cast
 
-from playwright.sync_api import Page, sync_playwright
+from playwright.sync_api import sync_playwright
 from pydantic import HttpUrl
 
 from app.models.player_fit_models import PlayerSearchResult
 from app.utils.decorators import timed
-from app.utils.scrapers.playwright_helpers import fetch_website_contents
+from app.utils.scrapers.playwright_helpers import PlaywrightDriver, PlaywrightElement, fetch_website_contents
 
 logging.basicConfig(
     level=logging.INFO,
@@ -17,178 +17,6 @@ log = logging.getLogger(__name__)
 
 # Base URL for the 247Sports player search experience.
 PLAYER_SEARCH_URL = "https://247sports.com/player"
-
-
-# ---------------------------
-# Test compatibility shim
-# ---------------------------
-
-class WebDriverWait:
-    """
-    Minimal wait shim to preserve unit test behavior.
-
-    IMPORTANT:
-    - This is NOT a real waiting mechanism.
-    - Playwright already handles synchronization internally.
-    - This shim exists purely to preserve existing test expectations.
-
-    :param driver: PlaywrightDriver instance under test
-    :param timeout: Ignored; preserved for interface compatibility
-    """
-
-    def __init__(self, driver, timeout: int):
-        self.driver = driver
-        self.timeout = timeout
-
-    def until(self, condition):
-        """
-        Execute the provided condition callable immediately.
-
-        :param condition: Callable accepting the driver and returning a value
-        :return: The result of the condition callable
-        """
-        if callable(condition):
-            result = condition(self.driver)
-
-            # Synchronize current_url after condition execution
-            self.driver.current_url = self.driver.page.url
-            return result
-
-        return condition
-
-
-# ---------------------------
-# Playwright-backed driver
-# ---------------------------
-
-class PlaywrightDriver:
-    """
-    Thin wrapper around a Playwright Page.
-
-    This class intentionally exposes a small, stable surface area
-    so that scraping logic remains readable and unit tests can
-    mock browser behavior predictably.
-
-    This is an adapter, not a general-purpose browser abstraction.
-    """
-
-    def __init__(self, page: Page):
-        """
-        :param page: Playwright Page instance
-        """
-        self.page = page
-        self.current_url = ""
-
-    def get(self, url: str) -> None:
-        """
-        Navigate to the given URL.
-
-        :param url: Absolute URL to navigate to
-        :return: None
-        """
-        self.page.goto(url, wait_until="domcontentloaded")
-        self.current_url = self.page.url
-
-    def find_elements(
-        self,
-        by: str,
-        value: Optional[str] = None,
-    ) -> List["PlaywrightElement"]:
-        """
-        Locate multiple elements using a CSS selector.
-
-        Only CSS selectors are supported to keep the interface minimal
-        and explicit.
-
-        :param by: Locator strategy (must be "css selector")
-        :param value: CSS selector string
-        :return: List of PlaywrightElement wrappers
-        """
-        if by != "css selector":
-            raise NotImplementedError("Only CSS selector is supported")
-
-        elements = self.page.query_selector_all(value or "")
-        return [PlaywrightElement(el) for el in elements]
-
-
-class PlaywrightElement:
-    """
-    Lightweight wrapper around a Playwright element handle.
-
-    Exposes a limited set of helper methods required by the scraper
-    and test suite while keeping direct DOM access explicit.
-    """
-
-    def __init__(self, element):
-        """
-        :param element: Playwright element handle
-        """
-        self.element = element
-
-    def clear(self) -> None:
-        """
-        Clear the contents of an input element.
-
-        :return: None
-        """
-        self.element.fill("")
-
-    def send_keys(self, keys: str) -> None:
-        """
-        Send keystrokes to the element.
-
-        NOTE:
-        - Newline ('\\n') is treated as Enter
-        - All other input is typed verbatim
-
-        :param keys: Text or newline to send
-        :return: None
-        """
-        if keys == "\n":
-            self.element.press("Enter")
-        else:
-            self.element.type(keys)
-
-    def get_attribute(self, name: str) -> Optional[str]:
-        """
-        Retrieve an element attribute.
-
-        :param name: Attribute name
-        :return: Attribute value or None if missing
-        """
-        return self.element.get_attribute(name)
-
-    def find_element(
-        self,
-        by: str,
-        value: Optional[str] = None,
-    ) -> "PlaywrightElement":
-        """
-        Locate a single descendant element using a CSS selector.
-
-        :param by: Locator strategy (must be "css selector")
-        :param value: CSS selector
-        :return: Wrapped PlaywrightElement
-        :raises ValueError: If the element cannot be found
-        """
-        if by != "css selector":
-            raise NotImplementedError
-
-        el = self.element.query_selector(value)
-        if el is None:
-            raise ValueError("Element not found")
-
-        return PlaywrightElement(el)
-
-    @property
-    def text(self) -> str:
-        """
-        Return visible inner text of the element.
-
-        :return: Stripped text content
-        """
-        return self.element.inner_text().strip()
-
 
 # ---------------------------
 # Scraper

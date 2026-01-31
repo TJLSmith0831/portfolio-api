@@ -1,7 +1,7 @@
 import pytest
 
-from app.api import player_fit_summarizer as summarizer
-from app.api.player_fit_summarizer import _chat_with_retries
+from app.services import player_fit_summarizer as summarizer
+from app.services.player_fit_summarizer import _chat_with_retries
 from app.models.player_fit_models import PlayerFitRequest, RelevantInfoResponse
 
 

@@ -1,28 +1,20 @@
-"""
-The Ollama connection to the player-fit summarizer demo.
-This module now uses a Playwright-based browser implementation
-while preserving all original behavior and prompts.
-"""
 import json
 import sys
-import re
 import logging
 
-from fastapi import APIRouter
 from playwright.sync_api import sync_playwright
 
+from app.utils.decorators import timed
+from app.utils.scrapers.playwright_helpers import fetch_website_contents, PlaywrightDriver
+from app.utils.scrapers.sports247_scraper import Sports247Scraper
+
+from app.llm_client import get_llm_client, OllamaModels
 from app.models.player_fit_models import (
-    PlayerFitSummary,
     PlayerFitRequest,
-    PlayerFitSummaryRequest,
-    PlayerFitSummaryResponse,
+    PlayerFitSummary,
     RelevantInfoResponse,
 )
-from app.utils.decorators import timed
-from app.utils.scrapers.driver_singleton import get_driver, driver_lock
-from app.utils.scrapers.playwright_helpers import fetch_website_contents
-from app.utils.scrapers.sports247_scraper import Sports247Scraper, PlaywrightDriver
-from app.llm_client import OllamaModels, get_llm_client, LLMClient
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -30,10 +22,6 @@ logging.basicConfig(
 )
 
 log = logging.getLogger(__name__)
-
-SUMMARIZER_ENDPOINT = "/summarize_player_fit"
-
-router = APIRouter(tags=["Summarize Player Fit"])
 
 # =========================
 # Helper functions
@@ -69,7 +57,7 @@ def _chat_with_retries(
     last_error = None
 
     for attempt in range(1, max_retries + 2):
-        log.info("Ollama attempt %d/%d", attempt, max_retries + 1)
+        log.info("LLM attempt %d/%d", attempt, max_retries + 1)
 
         chat_messages = []
         if system:
@@ -319,7 +307,6 @@ class PlayerFitSummarizer:
         """
         page_text = fetch_website_contents(driver, profile_url)
 
-        log.info(f"Website contents: {page_text}")
         parsed_json = _chat_with_retries(
             client=self.client,
             model=model.value,
@@ -327,7 +314,6 @@ class PlayerFitSummarizer:
             messages=[{"role": "user", "content": page_text}],
             max_retries=2,
         )
-        log.info(f"Received response from Ollama: {parsed_json}")
 
         return RelevantInfoResponse(**parsed_json)
 
@@ -369,51 +355,6 @@ class PlayerFitSummarizer:
             team_name=team_name,
         )
         return PlayerFitSummary(**normalized)
-
-# =========================
-# API entry point
-# =========================
-
-@router.post("/summarize_player_fit", response_model=PlayerFitSummaryResponse)
-def summarize_player_fit(request: PlayerFitSummaryRequest) -> PlayerFitSummaryResponse:
-    """
-    Generate a structured player fit summary using Playwright.
-    """
-
-    browser = get_driver()
-
-    with driver_lock:
-        context = browser.new_context()
-        page = context.new_page()
-        driver = PlaywrightDriver(page)
-
-        client = get_llm_client()
-        summarizer = PlayerFitSummarizer(client=client)
-
-        try:
-            scraper = Sports247Scraper(driver)
-            search_result = scraper.search_player_profile(request.player_name)
-
-            if not search_result or not search_result.found:
-                raise RuntimeError(
-                    f"No player profile found for '{request.player_name}'"
-                )
-
-            relevant_info = summarizer.select_relevant_information(
-                driver,
-                str(search_result.profile_url),
-            )
-
-            summary = summarizer.summarizer_player_fit(
-                player_name=request.player_name,
-                team_name=request.requested_team_name,
-                player_profile=relevant_info,
-            )
-
-            return PlayerFitSummaryResponse(summary=summary)
-
-        finally:
-            context.close()
 
 # =========================
 # CLI entry point

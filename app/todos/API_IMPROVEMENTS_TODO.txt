@@ -21,7 +21,15 @@ LLM client reuse + model pinning
 [X] In _chat_with_retries, add:
     - temperature=0
     - max_tokens=500 (tune per response size)
-[ ] Migrate to job-based framework to improve latency and handle multiple requests at once.
+[X] Migrate to job-based framework to improve latency and handle multiple requests at once.
+    [X] Install Redis
+    [X] Write Redis store tests
+    [X] Create Redis store for job queues
+    [X] Update endpoint to return job ID
+    [X] Add BackgroundTask to process job
+    [X] Create a job queue and worker
+    [X] Add job status endpoint
+    [X] Update framework to send final output to UI when completed
 
 Start Ollama inside the container + keep warm
 --------------------------------------------
