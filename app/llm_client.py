@@ -15,7 +15,6 @@ from typing import Any
 
 from openai import OpenAI
 
-
 class OllamaModels(enum.Enum):
     """
     This `OllamaModels` enum provides a set of predefined model names that

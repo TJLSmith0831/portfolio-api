@@ -1,0 +1,22 @@
+services:
+  api:
+    platform: linux/amd64
+    build:
+      context: .
+    image: portfolio-api
+    ports:
+      - "8000:8000"
+      - "11434:11434"
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      OLLAMA_KEEP_ALIVE: 10m
+      OLLAMA_NUM_PARALLEL: 1
+      OLLAMA_MAX_LOADED_MODELS: 1
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"

@@ -33,14 +33,14 @@ LLM client reuse + model pinning
 
 Start Ollama inside the container + keep warm
 --------------------------------------------
-[ ] Add /app/entrypoint.sh that:
+[X] Add /app/entrypoint.sh that:
     - starts `ollama serve` in background
     - pulls your pinned model (ollama pull llama3.2:1b)
     - then starts uvicorn
-[ ] In Dockerfile:
+[X] In Dockerfile:
     - COPY entrypoint.sh and chmod +x
     - switch CMD to run /app/entrypoint.sh
-[ ] Add env vars in Dockerfile (or runtime):
+[X] Add env vars in Dockerfile (or runtime):
     - OLLAMA_KEEP_ALIVE=10m
     - OLLAMA_NUM_PARALLEL=1
     - OLLAMA_MAX_LOADED_MODELS=1

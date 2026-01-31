@@ -23,7 +23,11 @@ RUN apt-get update && apt-get install -y \
     libxss1 \
     libxtst6 \
     xdg-utils \
+    zstd \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Ollama
+RUN curl -fsSL https://ollama.com/install.sh | sh
 
 # Install uv via pip (reliable in Docker)
 RUN pip install --no-cache-dir uv
@@ -36,9 +40,21 @@ COPY pyproject.toml uv.lock ./
 # Install dependencies (no venv inside container)
 RUN uv sync --frozen --no-dev
 
+# Install Playwright browsers
+RUN uv run playwright install chromium
+
 # Copy application code
 COPY . .
 
+# Ollama runtime configuration
+ENV OLLAMA_KEEP_ALIVE=10m \
+    OLLAMA_NUM_PARALLEL=1 \
+    OLLAMA_MAX_LOADED_MODELS=1
+
+# Entrypoint script
+COPY app/entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
 EXPOSE 8000
 
-CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["/app/entrypoint.sh"]

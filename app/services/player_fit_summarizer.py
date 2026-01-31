@@ -300,7 +300,7 @@ class PlayerFitSummarizer:
         self,
         driver: PlaywrightDriver,
         profile_url: str,
-        model: OllamaModels = OllamaModels.LLAMA_3B
+        model: OllamaModels = OllamaModels.LLAMA_1B
     ) -> RelevantInfoResponse:
         """
         Extract and normalize relevant football information from a player profile.
@@ -323,7 +323,7 @@ class PlayerFitSummarizer:
         player_name: str,
         team_name: str,
         player_profile: RelevantInfoResponse,
-        model: OllamaModels = OllamaModels.LLAMA_3B
+        model: OllamaModels = OllamaModels.LLAMA_1B
     ) -> PlayerFitSummary:
         """
         Generate a structured player fit summary.
