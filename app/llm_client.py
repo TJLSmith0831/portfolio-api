@@ -10,6 +10,7 @@ when the SDK changes.
 import enum
 import json
 import os
+import threading
 from typing import Any
 
 from openai import OpenAI
@@ -22,8 +23,8 @@ class OllamaModels(enum.Enum):
     with a specific model identifier as it might be recognized by the Ollama
     server.
     """
-    LLAMA_LATEST='llama3.2'
-    LLAMA_SMALL='llama3.2:1b'
+    LLAMA_3B='llama3.2:3b'
+    LLAMA_1B='llama3.2:1b'
 
 
 class LLMClient:
@@ -35,7 +36,7 @@ class LLMClient:
     concrete API shape.
     """
 
-    def __init__(self, model: OllamaModels = OllamaModels.LLAMA_LATEST, host: str | None = None) -> None:
+    def __init__(self, model: OllamaModels = OllamaModels.LLAMA_1B, host: str | None = None) -> None:
         """
         Configure the SDK host.
 
@@ -152,23 +153,34 @@ class LLMClient:
 
         # raise ValueError(f"Unknown tool: {name}")
 
+# ===================
+# LLM Singleton
+# ===================
+_client: LLMClient | None = None
+_client_lock = threading.Lock()
 
-def get_llm_client(model: OllamaModels = OllamaModels.LLAMA_LATEST) -> LLMClient:
+def get_llm_client() -> LLMClient:
     """
-    Get an instance of the OllamaClient.
+    Return a process-wide singleton LLMClient.
+    """
+    global _client
 
-    :return: OllamaClient An instance of the OllamaClient.
-    """
-    return LLMClient(model=model)
+    if _client is None:
+        with _client_lock:
+            if _client is None:
+                _client = LLMClient(model=OllamaModels.LLAMA_1B)
+
+    return _client
+
 
 # Add a main function to test the wrapper's functionality
 if __name__ == "__main__":
     client = LLMClient()
     print(client.is_ollama_running())
     test_prompt = "Hello, world!"
-    print(f"Testing '{OllamaModels.LLAMA_LATEST.value}' model with: '{test_prompt}'")
+    print(f"Testing '{OllamaModels.LLAMA_3B.value}' model with: '{test_prompt}'")
     response = client.chat(
-        model=OllamaModels.LLAMA_LATEST.value,
+        model=OllamaModels.LLAMA_3B.value,
         messages=[{"role": "user", "content": test_prompt}],
     )
     print(response.choices[0].message.content)

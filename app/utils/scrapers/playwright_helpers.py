@@ -29,8 +29,7 @@ def fetch_website_contents(driver, url: str) -> str:
         log.info("Waiting for main content container")
         page.wait_for_selector("section.main-content.full", timeout=15_000)
     except PlaywrightTimeoutError:
-        log.warning("Timed out waiting for main content container")
-        return "No usable content found."
+        raise PlaywrightTimeoutError("Timed out waiting for main content container")
 
     parts: list[str] = []
 
@@ -76,7 +75,7 @@ def fetch_website_contents(driver, url: str) -> str:
 
                 break
     except Exception as exc:
-        log.warning("Failed extracting structured data: %s", exc)
+        raise ValueError(f"Failed extracting structured data: {exc}")
 
     # --------------------------------------------------
     # 2. Main semantic content only
@@ -111,10 +110,10 @@ def fetch_website_contents(driver, url: str) -> str:
             parts.append(main_text)
             log.info("Main content extracted (%d chars)", len(main_text))
         else:
-            log.warning("Main content container found but empty")
+            raise ValueError("Main content container found but empty")
 
     except Exception as exc:
-        log.warning("Failed extracting main content text: %s", exc)
+        raise ValueError(f"Failed extracting main content text: {exc}")
 
     combined = "\n\n".join(parts)
     log.info("Final extracted payload size: %d chars", len(combined))

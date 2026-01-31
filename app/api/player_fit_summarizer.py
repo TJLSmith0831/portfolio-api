@@ -91,6 +91,8 @@ def _chat_with_retries(
             response = client.chat(
                 model=model,
                 messages=chat_messages,
+                temperature=0,
+                max_tokens=500,
             )
         except Exception as exc:
             last_error = exc
@@ -183,30 +185,38 @@ def _normalize_player_fit_json(
 
 REL_INFO_SYSTEM_PROMPT = """
     You are given the raw textual contents of a college football player profile webpage.
-
-    Your task is to identify and extract the MOST IMPORTANT football-relevant information
-    needed to accurately understand and evaluate the player.
-
-    Focus on factual, high-signal information that should be normalized into a structured player record.
+    
+    Your task is to extract ONLY information that is explicitly and unambiguously stated
+    verbatim in the provided text. You are performing factual information extraction,
+    not analysis or inference.
+    
+    CRITICAL RULE:
+    Player position is a factual field.
+    You may ONLY populate "identity.position" if the exact position label
+    (e.g., "QB", "Quarterback", "Linebacker") appears explicitly in the text.
+    Do NOT infer position from statistics, context, archetypes, or football knowledge.
+    If no explicit position is present, set the value to null.
+    
+    Focus on high-signal football information suitable for normalization into
+    a structured player record.
     Ignore navigation elements, marketing copy, duplicated sections, and site boilerplate.
-
-    Prioritize identifying the following categories when present:
-
+    
+    Prioritize extracting the following categories when explicitly present:
+    
     - Player identity (name, position, height, weight)
     - Current and former schools
-    - If Transfer Player, Transfer portal or transfer prediction context (e.g., Crystal Ball, destinations, confidence)
-    - Recruiting or transfer rankings (overall and positional)
-    - Most recent season statistics (passing, rushing, receiving as applicable)
+    - Transfer portal or transfer prediction context when explicitly mentioned
+    - Recruiting or transfer rankings
+    - Most recent season statistics
     - Experience year / class
     - High school and hometown
-    - Notable recent headlines or narrative signals (titles only, not article bodies)
-
+    - Notable recent headlines (titles only)
+    
     Explicitly IGNORE:
     - Login prompts, subscription offers, ads
-    - Site navigation, footers, copyright notices
-    - Repeated or duplicated tables or labels
-    - UI labels such as “Timeline”, “Embed”, “Join”, “Watch”, etc.
-
+    - Navigation, footers, UI labels
+    - Duplicated tables or repeated labels
+    
     Respond ONLY with valid JSON using the following structure:
 
     {
@@ -241,15 +251,14 @@ REL_INFO_SYSTEM_PROMPT = """
         ]
     }
 
-    Only include fields when the information is clearly present in the text.
-    Do NOT infer or guess missing values.
-    Return ONLY valid JSON.
-    Do not include commentary, markdown, or trailing text.
-    Ensure the JSON object is complete and properly closed.
-    Output valid JSON only.
-    Do not use N/A, undefined, or comments.
-    Use null for unknown values.
-    Do not wrap the response in Markdown or code fences.
+    Rules:
+    - Only include fields when the information is explicitly present in the text
+    - Every value must be directly supported by the text
+    - When information is missing or ambiguous, use null
+    - Do NOT infer or guess
+    - Do NOT use N/A, undefined, or comments
+    - Output valid JSON only
+    - Do not wrap the response in Markdown
 """
 
 PLAYER_FIT_SYSTEM_PROMPT = """
@@ -314,13 +323,14 @@ class PlayerFitSummarizer:
         self,
         driver: PlaywrightDriver,
         profile_url: str,
-        model: OllamaModels = OllamaModels.LLAMA_LATEST
+        model: OllamaModels = OllamaModels.LLAMA_3B
     ) -> RelevantInfoResponse:
         """
         Extract and normalize relevant football information from a player profile.
         """
         page_text = fetch_website_contents(driver, profile_url)
 
+        log.info(f"Website contents: {page_text}")
         parsed_json = _chat_with_retries(
             client=self.client,
             model=model.value,
@@ -328,6 +338,7 @@ class PlayerFitSummarizer:
             messages=[{"role": "user", "content": page_text}],
             max_retries=2,
         )
+        log.info(f"Received response from Ollama: {parsed_json}")
 
         return RelevantInfoResponse(**parsed_json)
 
@@ -337,7 +348,7 @@ class PlayerFitSummarizer:
         player_name: str,
         team_name: str,
         player_profile: RelevantInfoResponse,
-        model: OllamaModels = OllamaModels.LLAMA_LATEST
+        model: OllamaModels = OllamaModels.LLAMA_3B
     ) -> PlayerFitSummary:
         """
         Generate a structured player fit summary.
@@ -377,7 +388,7 @@ class PlayerFitSummarizer:
 @router.post("/summarize_player_fit", response_model=PlayerFitSummaryResponse)
 def summarize_player_fit(
     request: PlayerFitSummaryRequest,
-    model: OllamaModels = OllamaModels.LLAMA_LATEST,
+    model: OllamaModels = OllamaModels.LLAMA_3B,
 ) -> PlayerFitSummaryResponse:
     """
     Generate a structured player fit summary using Playwright.
@@ -390,7 +401,7 @@ def summarize_player_fit(
         page = context.new_page()
         driver = PlaywrightDriver(page)
 
-        client = LLMClient(model=model)
+        client = get_llm_client()
         summarizer = PlayerFitSummarizer(client=client)
 
         try:
@@ -451,14 +462,14 @@ if __name__ == "__main__":
             relevant_info = summarizer.select_relevant_information(
                 driver=driver,
                 profile_url=str(search_result.profile_url),
-                model=OllamaModels.LLAMA_SMALL
+                model=OllamaModels.LLAMA_1B
             )
 
             summary = summarizer.summarizer_player_fit(
                 player_name=player_name,
                 team_name=team_name,
                 player_profile=relevant_info,
-                model=OllamaModels.LLAMA_SMALL
+                model=OllamaModels.LLAMA_1B
             )
 
             print(summary)

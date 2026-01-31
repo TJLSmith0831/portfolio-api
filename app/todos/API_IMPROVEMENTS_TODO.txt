@@ -3,22 +3,22 @@ TODO.txt — Speed up /summarize_player_fit + add timing logs
 
 Driver + concurrency
 --------------------
-[ ] Create app/scrapers/driver_singleton.py with:
+[X] Create app/scrapers/driver_singleton.py with:
     - a module-level Playwright driver singleton
     - a module-level threading.Lock()
     - get_driver() that initializes Chrome only once
-[ ] In summarize_player_fit endpoint:
+[X] In summarize_player_fit endpoint:
     - delete per-request webdriver.Chrome(...) creation
     - delete driver.quit() in finally
     - replace with: driver = get_driver()
     - wrap ALL playwright usage in: with driver_lock:
-[ ] Ensure you run uvicorn with ONE worker (no --workers > 1).
+[X] Ensure you run uvicorn with ONE worker (no --workers > 1).
 
 LLM client reuse + model pinning
 -------------------------------
 [X] Pin model tag: change OllamaModels.LLAMA from "llama3.2" / ":latest" to "llama3.2:1b" (or ":3b" if you must).
-[ ] Create a singleton LLMClient (don’t instantiate inside the request handler).
-[ ] In _chat_with_retries, add:
+[X] Create a singleton LLMClient (don’t instantiate inside the request handler).
+[X] In _chat_with_retries, add:
     - temperature=0
     - max_tokens=500 (tune per response size)
 [ ] Migrate to job-based framework to improve latency and handle multiple requests at once.

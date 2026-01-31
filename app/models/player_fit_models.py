@@ -50,6 +50,7 @@ class PlayerFitSummary(BaseModel):
         risks = "\n".join(f"  - {risk}" for risk in self.risk_factors) or "  - None"
 
         return (
+            f"------------------\n"
             f"Player Fit Summary\n"
             f"------------------\n"
             f"Player: {self.player}\n"
