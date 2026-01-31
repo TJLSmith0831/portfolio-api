@@ -13,6 +13,7 @@ class RelevantInfoResponse(BaseModel):
     rankings: Optional[Dict[str, Any]] = None
     latest_season_stats: Optional[Union[Dict[str, Any], str]] = None
     background: Optional[Dict[str, Any]] = None
+    raw_text: Optional[str] = None
     notable_headlines: List[Dict[str, Any]] = Field(default_factory=list)
 
 
@@ -65,10 +66,10 @@ class PlayerFitSummary(BaseModel):
             f"Overall Summary:\n"
             f"{self.overall_summary}"
         )
-        
+
 class PlayerFitSummaryRequest(BaseModel):
     player_name: str
     requested_team_name: str
-        
+
 class PlayerFitSummaryResponse(BaseModel):
     summary: PlayerFitSummary

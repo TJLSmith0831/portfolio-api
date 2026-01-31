@@ -1,36 +1,51 @@
 import json
-import sys
 import logging
+import sys
+from dataclasses import dataclass
+from typing import Iterable, Tuple
 
 from playwright.sync_api import sync_playwright
 
-from app.utils.decorators import timed
-from app.utils.scrapers.playwright_helpers import fetch_website_contents, PlaywrightDriver
-from app.utils.scrapers.sports247_scraper import Sports247Scraper
-
-from app.llm_client import get_llm_client, OllamaModels
+from app.llm_client import OllamaModels, get_llm_client
 from app.models.player_fit_models import (
     PlayerFitRequest,
     PlayerFitSummary,
     RelevantInfoResponse,
 )
-
+from app.utils.decorators import timed
+from app.utils.scrapers.playwright_helpers import PlaywrightDriver, fetch_website_contents
+from app.utils.scrapers.sports247_scraper import Sports247Scraper
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
-
 log = logging.getLogger(__name__)
 
-# =========================
-# Helper functions
-# =========================
+PLAYER_FIT_JSON_TEMPLATE = """{
+  "position": "string",
+  "fit_score": number (0-100),
+  "scheme_fit": "string",
+  "depth_chart_impact": "string",
+  "development_outlook": "string",
+  "risk_factors": ["string"],
+  "overall_summary": "string"
+}"""
+
+REQUIRED_TEXT_FIELDS = [
+    "scheme_fit",
+    "depth_chart_impact",
+    "development_outlook",
+    "overall_summary",
+]
+
+# --------------------------------------------------------------------------- #
+# Helper utilities                                                            #
+# --------------------------------------------------------------------------- #
+
 
 def _parse_json_lenient(text: str) -> dict:
-    """
-    Parse JSON from LLM output with basic repair logic.
-    """
+    """Parse JSON from LLM output with extremely small repair logic."""
     text = text.strip()
 
     try:
@@ -54,12 +69,15 @@ def _chat_with_retries(
     messages: list[dict],
     max_retries: int = 2,
 ) -> dict:
+    """
+    Execute a chat completion with light retry / JSON repair logic.
+    """
     last_error = None
 
     for attempt in range(1, max_retries + 2):
         log.info("LLM attempt %d/%d", attempt, max_retries + 1)
 
-        chat_messages = []
+        chat_messages: list[dict] = []
         if system:
             chat_messages.append({"role": "system", "content": system})
         chat_messages.extend(messages)
@@ -69,14 +87,13 @@ def _chat_with_retries(
                 model=model,
                 messages=chat_messages,
                 temperature=0,
-                max_tokens=500,
+                max_tokens=650,
             )
-        except Exception as exc:
+        except Exception as exc:  # pragma: no cover - network failures
             last_error = exc
             log.warning("Chat call failed on attempt %d: %s", attempt, exc)
             continue
 
-        # ---- Extract raw text (Ollama-safe) ----
         raw_text = response.choices[0].message.content.strip()
         log.debug("Raw LLM output:\n%s", raw_text)
 
@@ -86,19 +103,16 @@ def _chat_with_retries(
             last_error = exc
             log.warning("JSON parse failed on attempt %d: %s", attempt, exc)
 
-            # ---- Repair prompt only if retrying ----
-            messages = [
-                {
-                    "role": "user",
-                    "content": (
-                        "The previous response was not valid JSON.\n\n"
-                        "Return ONLY a complete, valid JSON object.\n"
-                        "Do not include markdown, comments, or explanations.\n"
-                        "Use null for unknown values.\n\n"
-                        f"Previous response:\n{raw_text}"
-                    ),
-                }
-            ]
+            repair_prompt = (
+                "The previous response was not valid JSON.\n\n"
+                "Return ONLY a complete JSON object that matches this template:\n"
+                f"{PLAYER_FIT_JSON_TEMPLATE}\n\n"
+                "Do not include markdown, comments, or explanations.\n"
+                "Use null only when information is truly absent.\n\n"
+                f"Previous response:\n{raw_text}"
+            )
+
+            messages = [{"role": "user", "content": repair_prompt}]
 
     raise RuntimeError(
         f"Failed after {max_retries + 1} attempts. Last error: {last_error}"
@@ -111,10 +125,7 @@ def _normalize_player_fit_json(
     player_name: str,
     team_name: str,
 ) -> dict:
-    """
-    Normalize and harden LLM output so it always satisfies PlayerFitSummary.
-    """
-
+    """Normalize the LLM response into a PlayerFitSummary-compatible dict."""
     raw_risks = data.get("risk_factors") or []
     normalized_risks: list[str] = []
 
@@ -131,239 +142,369 @@ def _normalize_player_fit_json(
         else:
             normalized_risks.append(str(risk))
 
+    fit_score_raw = data.get("fit_score", 0)
+    try:
+        fit_score_value = int(fit_score_raw)
+    except (TypeError, ValueError):
+        fit_score_value = 0
+
     return {
-        # AUTHORITATIVE FIELDS
         "player": player_name,
         "team": team_name,
         "position": data.get("position") or "Unknown Position",
-
-        # SCORING
-        "fit_score": int(data.get("fit_score", 0)),
-
-        # ANALYSIS
+        "fit_score": fit_score_value,
         "scheme_fit": data.get("scheme_fit")
         or "No scheme fit was provided.",
-
         "depth_chart_impact": data.get("depth_chart_impact")
         or "No depth chart impact was provided.",
-
         "development_outlook": data.get("development_outlook")
         or "No development outlook was provided.",
-
         "risk_factors": normalized_risks,
-
         "overall_summary": data.get("overall_summary")
         or "No detailed summary was generated based on the available information.",
     }
 
-# =========================
-# System Prompts
-# =========================
 
-REL_INFO_SYSTEM_PROMPT = """
-You are given the raw text of a college football player profile webpage.
+def _extract_identity_and_profile(extracted_text: str) -> Tuple[dict[str, str], str]:
+    """
+    Extract the structured identity snippet and cleaned main text from the page payload.
+    """
+    marker_identity = "=== PLAYER IDENTITY ==="
+    marker_profile = "=== PROFILE CONTENT ==="
 
-Extract ONLY information explicitly stated in the text. No inference or analysis.
+    if marker_identity not in extracted_text:
+        return {}, extracted_text.strip()
 
-CRITICAL:
-Only populate identity.position if the exact position label appears verbatim.
-Do NOT infer. Otherwise use null.
+    _, after_identity = extracted_text.split(marker_identity, 1)
 
-Extract high-signal football information suitable for a structured player record.
-Ignore navigation, ads, boilerplate, UI labels, and duplicated content.
+    if marker_profile in after_identity:
+        identity_block, profile_block = after_identity.split(marker_profile, 1)
+    else:
+        identity_block = after_identity
+        profile_block = ""
 
-Prioritize extracting, when explicitly present:
-- Player identity (name, position, height, weight)
-- Current and former schools
-- Transfer portal or transfer prediction context
-- Recruiting or transfer rankings
-- Most recent season statistics
-- Experience year / class
-- High school and hometown
-- Notable recent headlines (titles only)
+    identity_map: dict[str, str] = {}
 
-Respond ONLY with valid JSON using exactly this structure:
+    for raw_line in identity_block.strip().splitlines():
+        line = raw_line.strip()
+        if not line or ":" not in line:
+            continue
 
-{
-  "identity": {
-    "name": "...",
-    "position": "...",
-    "height": "...",
-    "weight": "..."
-  },
-  "school_context": {
-    "current_school": "...",
-    "transfer_interest": {
-      "destination": "...",
-      "confidence": "..."
+        key, value = line.split(":", 1)
+        key = key.strip()
+        value = value.strip()
+
+        if key:
+            identity_map[key] = value
+
+    profile_text = profile_block.strip() or extracted_text.strip()
+    return identity_map, profile_text
+
+
+def _build_relevant_info_response(
+    identity_map: dict[str, str],
+    profile_text: str,
+) -> RelevantInfoResponse:
+    """Convert the scraped artifacts into a RelevantInfoResponse."""
+    identity_section = {
+        "name": identity_map.get("Name"),
+        "position": identity_map.get("Position"),
+        "height": identity_map.get("Height"),
+        "weight": identity_map.get("Weight"),
     }
-  },
-  "rankings": {
-    "transfer_ranking": "...",
-    "prospect_ranking": "..."
-  },
-  "latest_season_stats": {
-    "year": "...",
-    "summary": "concise statistical summary"
-  },
-  "background": {
-    "high_school": "...",
-    "hometown": "...",
-    "experience_year": "..."
-  },
-  "notable_headlines": [
-    { "title": "...", "date": "..." }
-  ]
-}
+    identity_section = {k: v for k, v in identity_section.items() if v}
 
-Rules:
-- Include fields only when explicitly supported by the text
-- Use null when information is missing or ambiguous
-- Do NOT infer or guess
-- Do NOT use N/A or comments
-- Output valid JSON only
-- Do not use Markdown
-"""
+    school_context = {}
+    affiliation = identity_map.get("Affiliation")
+    if affiliation:
+        school_context["current_school"] = affiliation
+
+    profile_excerpt = profile_text.strip()
+
+    background = {}
+    if profile_excerpt:
+        background["profile_text"] = profile_excerpt
+    if identity_map:
+        background["identity_labels"] = identity_map
+
+    return RelevantInfoResponse(
+        identity=identity_section or None,
+        school_context=school_context or None,
+        rankings=None,
+        latest_season_stats=None,
+        background=background or None,
+        raw_text=profile_excerpt or None,
+        notable_headlines=[],
+    )
 
 
-PLAYER_FIT_SYSTEM_PROMPT = """
-You are a college football recruiting analyst.
+def _validate_player_fit_payload(data: dict) -> tuple[bool, list[str]]:
+    """
+    Verify the LLM output satisfies the required schema and semantics.
+    Returns (is_valid, list_of_issues)
+    """
+    issues: list[str] = []
 
-Based on the provided player profile and the requested college team,
-evaluate the player's projected fit.
+    fit_score = data.get("fit_score")
 
-Return ONLY valid JSON using EXACTLY this structure:
+    if isinstance(fit_score, str):
+        try:
+            fit_score_int = int(float(fit_score))
+            if fit_score_int < 0 or fit_score_int > 100:
+                issues.append("fit_score must be between 0 and 100")
+        except (ValueError, TypeError):
+            issues.append("fit_score must be a valid integer between 0 and 100")
 
-{
-  "position": "string",
-  "fit_score": number (0-100),
-  "scheme_fit": "string",
-  "depth_chart_impact": "string",
-  "development_outlook": "string",
-  "risk_factors": ["string"],
-  "overall_summary": "string"
-}
+    for field in REQUIRED_TEXT_FIELDS:
+        value = data.get(field)
+        if not isinstance(value, str) or not value.strip():
+            issues.append(f"{field} must be a non-empty string")
 
-Rules:
-- Reference ONLY the requested college team
-- Do NOT repeat raw biographical data
-- Do NOT invent facts not supported by the profile
-- Use the correct two-character position abbreviation
-- If information is missing, explain uncertainty in text fields
-- risk_factors must be an array (empty if none)
-- Output JSON only
+    risks = data.get("risk_factors")
+    if not isinstance(risks, list):
+        issues.append("risk_factors must be an array (can be empty)")
 
-Additional requirements for overall_summary:
-- Must be 3–5 sentences
-- Must synthesize scheme fit, depth chart impact, and development outlook
-- Must clearly state why the fit_score is justified
-- Must read as a final scouting conclusion, not a recap
-"""
+    return (len(issues) == 0), issues
 
 
-# =========================
-# PlayerFitSummarizer
-# =========================
+def _build_repair_prompt(
+    *,
+    missing_reasons: Iterable[str],
+    structured_json: str,
+    raw_excerpt: str,
+    player_name: str,
+    team_name: str,
+) -> str:
+    """Construct the follow-up prompt when fields are missing."""
+    missing_bullets = "\n".join(f"- {reason}" for reason in missing_reasons)
+
+    return (
+        "Your previous JSON omitted required information. Rewrite the JSON so every "
+        "required field is populated with substantive analysis grounded in the excerpt.\n\n"
+        "Missing / invalid items:\n"
+        f"{missing_bullets}\n\n"
+        "Return ONLY JSON that matches this template exactly:\n"
+        f"{PLAYER_FIT_JSON_TEMPLATE}\n\n"
+        f"Player: {player_name}\n"
+        f"Team: {team_name}\n\n"
+        "Structured profile data (for reference):\n"
+        f"{structured_json}\n\n"
+        "Primary source excerpt (verbatim):\n"
+        f"{raw_excerpt}\n"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# PlayerFitSummarizer                                                         #
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(slots=True)
+class ScrapedProfile:
+    """Container for the scraped content used by the summarizer."""
+
+    relevant_info: RelevantInfoResponse
+    structured_json: str
+    raw_excerpt: str
+
 
 class PlayerFitSummarizer:
-    """Object-oriented wrapper around the player fit summarization flow."""
+    """Single-pass player fit summarization pipeline."""
 
-    def __init__(self, client=None):
-        """
-        :param client: Optional Ollama client
-        """
+    def __init__(self, client=None) -> None:
         self.client = client or get_llm_client()
         self.logger = log
 
-    def _build_player_fit_prompt(self, request: PlayerFitRequest) -> str:
-        """Build the LLM prompt for player fit analysis."""
-        return f"""
-        **Output valid JSON only**.
+    # ------------------------------------------------------------------ #
+    # Scraping helpers                                                   #
+    # ------------------------------------------------------------------ #
 
-        Player: {request.player_name}
-        Team: {request.team_name}
+    def _scrape_profile(
+        self,
+        driver: PlaywrightDriver,
+        profile_url: str,
+    ) -> ScrapedProfile:
+        page_payload = fetch_website_contents(driver, profile_url)
+        identity_map, profile_text = _extract_identity_and_profile(page_payload)
 
-        Player profile information:
-        {request.player_profile.model_dump_json(indent=2)}
-                
-        Evaluation instructions:
-        - Treat overall_summary as a final executive-style scouting conclusion
-        - Write it as a multi-sentence paragraph (not a single sentence)
-        - Synthesize scheme fit, roster role, and long-term projection
-        - No Markdown or weird language. Final output must be valid JSON.
+        self.logger.info(
+            "scrape_profile extracted identity keys: %s", list(identity_map.keys())
+        )
+        self.logger.info(
+            "scrape_profile profile excerpt length: %d", len(profile_text),
+        )
 
-        Evaluate scheme fit, roster impact, development trajectory, and risks.
-        """
+        relevant_info = _build_relevant_info_response(identity_map, profile_text)
+
+        structured_json = relevant_info.model_dump_json(
+            indent=2,
+            exclude_none=True,
+        )
+        raw_excerpt = (relevant_info.raw_text or "")[:1800]
+
+        background = dict(relevant_info.background or {})
+        if raw_excerpt and not background.get("profile_text"):
+            background["profile_text"] = raw_excerpt
+        background["structured_json"] = structured_json
+        relevant_info.background = background
+        relevant_info.raw_text = raw_excerpt
+
+        return ScrapedProfile(
+            relevant_info=relevant_info,
+            structured_json=structured_json,
+            raw_excerpt=raw_excerpt,
+        )
+
+    # ------------------------------------------------------------------ #
+    # Prompting                                                          #
+    # ------------------------------------------------------------------ #
+
+    def _build_player_fit_prompt(
+        self,
+        request: PlayerFitRequest,
+        *,
+        structured_json: str,
+        raw_excerpt: str,
+    ) -> str:
+        return (
+            "**Output valid JSON only.**\n\n"
+            f"Player: {request.player_name}\n"
+            f"Team: {request.team_name}\n\n"
+            "Structured profile data (scraped context summarized below):\n"
+            f"{structured_json}\n\n"
+            "Primary source excerpt (verbatim, truncated to 1800 chars):\n"
+            f"{raw_excerpt}\n\n"
+            "Instructions:\n"
+            "- Populate every field in the template below with grounded analysis.\n"
+            "- Do not repeat raw biographical facts unless they support the evaluation.\n"
+            "- Always justify the fit_score using evidence from the excerpt.\n"
+            "- risk_factors must be an array. Use [] if none are identified.\n"
+            "- Write scheme_fit, depth_chart_impact, and development_outlook as distinct paragraphs.\n"
+            "- overall_summary must be 3-5 sentences synthesizing the recommendation.\n"
+            "- Output JSON only—no markdown, commentary, or extra keys.\n\n"
+            "Template:\n"
+            f"{PLAYER_FIT_JSON_TEMPLATE}\n"
+        )
+
+    def _invoke_player_fit_model(
+        self,
+        *,
+        player_name: str,
+        team_name: str,
+        relevant_info: RelevantInfoResponse,
+        structured_json: str,
+        raw_excerpt: str,
+    ) -> dict:
+        request = PlayerFitRequest(
+            player_name=player_name,
+            team_name=team_name,
+            player_profile=relevant_info,
+        )
+        base_prompt = self._build_player_fit_prompt(
+            request,
+            structured_json=structured_json,
+            raw_excerpt=raw_excerpt,
+        )
+
+        parsed_json = _chat_with_retries(
+            client=self.client,
+            model=self.client.model_enum.value,
+            system="You are an elite college football recruiting analyst.",
+            messages=[{"role": "user", "content": base_prompt}],
+            max_retries=1,
+        )
+
+        valid, issues = _validate_player_fit_payload(parsed_json)
+
+        if valid:
+            return parsed_json
+
+        repair_prompt = _build_repair_prompt(
+            missing_reasons=issues,
+            structured_json=structured_json,
+            raw_excerpt=raw_excerpt,
+            player_name=player_name,
+            team_name=team_name,
+        )
+
+        self.logger.info(
+            "First LLM response missing required fields. Triggering repair: %s", issues
+        )
+
+        repaired_json = _chat_with_retries(
+            client=self.client,
+            model=self.client.model_enum.value,
+            system="You are an elite college football recruiting analyst.",
+            messages=[{"role": "user", "content": repair_prompt}],
+            max_retries=1,
+        )
+
+        return repaired_json
+
+    # ------------------------------------------------------------------ #
+    # Public API                                                         #
+    # ------------------------------------------------------------------ #
 
     @timed()
     def select_relevant_information(
         self,
         driver: PlaywrightDriver,
         profile_url: str,
-        model: OllamaModels = OllamaModels.LLAMA_1B
+        model: OllamaModels = OllamaModels.LLAMA_1B,  # retained for compatibility
     ) -> RelevantInfoResponse:
         """
-        Extract and normalize relevant football information from a player profile.
+        Scrape the player profile and return structured information plus raw excerpt.
         """
-        page_text = fetch_website_contents(driver, profile_url)
-
-        parsed_json = _chat_with_retries(
-            client=self.client,
-            model=model.value,
-            system=REL_INFO_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": page_text}],
-            max_retries=2,
-        )
-
-        return RelevantInfoResponse(**parsed_json)
+        scraped = self._scrape_profile(driver, profile_url)
+        return scraped.relevant_info
 
     @timed()
     def summarizer_player_fit(
         self,
         player_name: str,
         team_name: str,
-        player_profile: RelevantInfoResponse,
-        model: OllamaModels = OllamaModels.LLAMA_1B
+        player_profile: RelevantInfoResponse | None,
+        model: OllamaModels = OllamaModels.LLAMA_1B,
     ) -> PlayerFitSummary:
         """
-        Generate a structured player fit summary.
+        Generate the full player-fit summary in a single LLM call with validation.
         """
-        request = PlayerFitRequest(
+        if not player_profile:
+            raise ValueError("player_profile is required for summarizer_player_fit")
+
+        background = player_profile.background or {}
+        raw_excerpt = player_profile.raw_text or background.get("profile_text", "")
+
+        structured_json = background.get("structured_json") or player_profile.model_dump_json(
+            indent=2,
+            exclude_none=True,
+        )
+
+        parsed_json = self._invoke_player_fit_model(
             player_name=player_name,
             team_name=team_name,
-            player_profile=player_profile,
+            relevant_info=player_profile,
+            structured_json=structured_json,
+            raw_excerpt=raw_excerpt[:1800],
         )
 
-        # Evaluate scheme fit, roster impact, development trajectory, and risks.
-        parsed_json = _chat_with_retries(
-            client=self.client,
-            model=model.value,
-            system=PLAYER_FIT_SYSTEM_PROMPT,
-            messages=[
-                {
-                    "role": "user",
-                    "content": self._build_player_fit_prompt(request),
-                }
-            ],
-            max_retries=2,
-        )
-
-        # Normalize JSON to ensure consistent structure
         normalized = _normalize_player_fit_json(
             parsed_json,
             player_name=player_name,
             team_name=team_name,
         )
+
         return PlayerFitSummary(**normalized)
 
-# =========================
-# CLI entry point
-# =========================
+
+# --------------------------------------------------------------------------- #
+# CLI entry point                                                            #
+# --------------------------------------------------------------------------- #
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
         raise SystemExit(
-            "Usage: python player_fit_summarizer.py \"Player Name\" \"Team Name\""
+            'Usage: python player_fit_summarizer.py "Player Name" "Team Name"'
         )
 
     player_name = sys.argv[1]
@@ -389,14 +530,12 @@ if __name__ == "__main__":
             relevant_info = summarizer.select_relevant_information(
                 driver=driver,
                 profile_url=str(search_result.profile_url),
-                model=OllamaModels.LLAMA_1B
             )
 
             summary = summarizer.summarizer_player_fit(
                 player_name=player_name,
                 team_name=team_name,
                 player_profile=relevant_info,
-                model=OllamaModels.LLAMA_1B
             )
 
             print(summary)
