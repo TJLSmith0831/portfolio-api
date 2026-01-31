@@ -40,10 +40,12 @@ def process_player_fit_job(job_id: str) -> None:
             context = browser.new_context()
             page = context.new_page()
             driver = PlaywrightDriver(page)
+            llm_client = get_llm_client()
+            model = llm_client.model_enum
 
             try:
                 scraper = Sports247Scraper(driver)
-                summarizer = PlayerFitSummarizer(client=get_llm_client())
+                summarizer = PlayerFitSummarizer(client=llm_client)
 
                 search_result = scraper.search_player_profile(
                     payload["player_name"]
@@ -55,14 +57,16 @@ def process_player_fit_job(job_id: str) -> None:
                     )
 
                 relevant_info = summarizer.select_relevant_information(
-                    driver,
-                    str(search_result.profile_url),
+                    driver=driver,
+                    profile_url=str(search_result.profile_url),
+                    model=model
                 )
 
                 summary = summarizer.summarizer_player_fit(
                     player_name=payload["player_name"],
                     team_name=payload["requested_team_name"],
                     player_profile=relevant_info,
+                    model=model
                 )
 
                 job_store.complete_job(job_id, summary.model_dump())

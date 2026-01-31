@@ -161,87 +161,75 @@ def _normalize_player_fit_json(
 # =========================
 
 REL_INFO_SYSTEM_PROMPT = """
-    You are given the raw textual contents of a college football player profile webpage.
+You are given the raw text of a college football player profile webpage.
 
-    Your task is to extract ONLY information that is explicitly and unambiguously stated
-    verbatim in the provided text. You are performing factual information extraction,
-    not analysis or inference.
+Extract ONLY information explicitly stated in the text. No inference or analysis.
 
-    CRITICAL RULE:
-    Player position is a factual field.
-    You may ONLY populate "identity.position" if the exact position label
-    (e.g., "QB", "Quarterback", "Linebacker") appears explicitly in the text.
-    Do NOT infer position from statistics, context, archetypes, or football knowledge.
-    If no explicit position is present, set the value to null.
+CRITICAL:
+Only populate identity.position if the exact position label appears verbatim.
+Do NOT infer. Otherwise use null.
 
-    Focus on high-signal football information suitable for normalization into
-    a structured player record.
-    Ignore navigation elements, marketing copy, duplicated sections, and site boilerplate.
+Extract high-signal football information suitable for a structured player record.
+Ignore navigation, ads, boilerplate, UI labels, and duplicated content.
 
-    Prioritize extracting the following categories when explicitly present:
+Prioritize extracting, when explicitly present:
+- Player identity (name, position, height, weight)
+- Current and former schools
+- Transfer portal or transfer prediction context
+- Recruiting or transfer rankings
+- Most recent season statistics
+- Experience year / class
+- High school and hometown
+- Notable recent headlines (titles only)
 
-    - Player identity (name, position, height, weight)
-    - Current and former schools
-    - Transfer portal or transfer prediction context when explicitly mentioned
-    - Recruiting or transfer rankings
-    - Most recent season statistics
-    - Experience year / class
-    - High school and hometown
-    - Notable recent headlines (titles only)
+Respond ONLY with valid JSON using exactly this structure:
 
-    Explicitly IGNORE:
-    - Login prompts, subscription offers, ads
-    - Navigation, footers, UI labels
-    - Duplicated tables or repeated labels
-
-    Respond ONLY with valid JSON using the following structure:
-
-    {
-        "identity": {
-            "name": "...",
-            "position": "...",
-            "height": "...",
-            "weight": "..."
-        },
-        "school_context": {
-            "current_school": "...",
-            "transfer_interest": {
-            "destination": "...",
-            "confidence": "..."
-            }
-        },
-        "rankings": {
-            "transfer_ranking": "...",
-            "prospect_ranking": "...'
-        },
-        "latest_season_stats": {
-            "year": "...",
-            "summary": "concise statistical summary"
-        },
-        "background": {
-            "high_school": "...",
-            "hometown": "...",
-            "experience_year": "..."
-        },
-        "notable_headlines": [
-            {"title": "...", "date": "..."}
-        ]
+{
+  "identity": {
+    "name": "...",
+    "position": "...",
+    "height": "...",
+    "weight": "..."
+  },
+  "school_context": {
+    "current_school": "...",
+    "transfer_interest": {
+      "destination": "...",
+      "confidence": "..."
     }
+  },
+  "rankings": {
+    "transfer_ranking": "...",
+    "prospect_ranking": "..."
+  },
+  "latest_season_stats": {
+    "year": "...",
+    "summary": "concise statistical summary"
+  },
+  "background": {
+    "high_school": "...",
+    "hometown": "...",
+    "experience_year": "..."
+  },
+  "notable_headlines": [
+    { "title": "...", "date": "..." }
+  ]
+}
 
-    Rules:
-    - Only include fields when the information is explicitly present in the text
-    - Every value must be directly supported by the text
-    - When information is missing or ambiguous, use null
-    - Do NOT infer or guess
-    - Do NOT use N/A, undefined, or comments
-    - Output valid JSON only
-    - Do not wrap the response in Markdown
+Rules:
+- Include fields only when explicitly supported by the text
+- Use null when information is missing or ambiguous
+- Do NOT infer or guess
+- Do NOT use N/A or comments
+- Output valid JSON only
+- Do not use Markdown
 """
+
 
 PLAYER_FIT_SYSTEM_PROMPT = """
 You are a college football recruiting analyst.
 
-Based on the provided player profile and the requested team,
+Based on the provided player profile and the requested college team,
 evaluate the player's projected fit.
 
 Return ONLY valid JSON using EXACTLY this structure:
@@ -257,13 +245,19 @@ Return ONLY valid JSON using EXACTLY this structure:
 }
 
 Rules:
-- Only reference the requested college team. No NFL teams.
+- Reference ONLY the requested college team
 - Do NOT repeat raw biographical data
 - Do NOT invent facts not supported by the profile
-- Double check you're using the right position. Use the two character abbreviation.
+- Use the correct two-character position abbreviation
 - If information is missing, explain uncertainty in text fields
-- risk_factors MUST be an array (empty if none)
-- Return JSON only
+- risk_factors must be an array (empty if none)
+- Output JSON only
+
+Additional requirements for overall_summary:
+- Must be 3–5 sentences
+- Must synthesize scheme fit, depth chart impact, and development outlook
+- Must clearly state why the fit_score is justified
+- Must read as a final scouting conclusion, not a recap
 """
 
 
@@ -291,6 +285,12 @@ class PlayerFitSummarizer:
 
         Player profile information:
         {request.player_profile.model_dump_json(indent=2)}
+                
+        Evaluation instructions:
+        - Treat overall_summary as a final executive-style scouting conclusion
+        - Write it as a multi-sentence paragraph (not a single sentence)
+        - Synthesize scheme fit, roster role, and long-term projection
+        - No Markdown or weird language. Final output must be valid JSON.
 
         Evaluate scheme fit, roster impact, development trajectory, and risks.
         """

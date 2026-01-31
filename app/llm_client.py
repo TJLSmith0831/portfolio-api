@@ -53,7 +53,8 @@ class LLMClient:
             base_url="http://localhost:11434/v1",
             api_key="ollama",
         )
-        self.model = model.value
+        self.model_enum = model
+        self.model_name = model.value
 
     # --------------------------------------------------------------------- #
     # Direct SDK passthroughs
@@ -139,7 +140,6 @@ class LLMClient:
 
         return response
 
-
     def call_tool(self, name: Any, arguments: dict) -> str:
         """
         Call a tool with the given name and arguments.
@@ -167,7 +167,20 @@ def get_llm_client() -> LLMClient:
     if _client is None:
         with _client_lock:
             if _client is None:
-                _client = LLMClient(model=OllamaModels.LLAMA_1B)
+                model_name = os.getenv("OLLAMA_MODEL", "LLAMA_1B")
+
+                if model_name:
+                    try:
+                        model_enum = OllamaModels[model_name]
+                    except KeyError as exc:
+                        raise ValueError(
+                            f"Invalid OLLAMA_MODEL '{model_name}'. "
+                            f"Valid values: {[m.name for m in OllamaModels]}"
+                        ) from exc
+                else:
+                    model_enum = OllamaModels.LLAMA_1B
+
+                _client = LLMClient(model=model_enum)
 
     return _client
 
