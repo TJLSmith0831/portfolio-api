@@ -128,5 +128,5 @@ def test_get_player_fit_prompt_includes_request_details():
     assert "Jane Doe" in prompt
     assert "Example College" in prompt
     assert request.player_profile.model_dump_json(indent=2) in prompt
-    assert '"player": "Jane Doe"' in prompt
-    assert '"team": "Example College"' in prompt
+    assert 'Player: Jane Doe' in prompt
+    assert 'Team: Example College' in prompt
