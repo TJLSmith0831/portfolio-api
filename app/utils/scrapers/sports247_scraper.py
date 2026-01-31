@@ -5,7 +5,8 @@ from playwright.sync_api import Page, sync_playwright
 from pydantic import HttpUrl
 
 from app.models.player_fit_models import PlayerSearchResult
-from app.scrapers.playwright_helpers import fetch_website_contents
+from app.utils.decorators import timed
+from app.utils.scrapers.playwright_helpers import fetch_website_contents
 
 logging.basicConfig(
     level=logging.INFO,
@@ -216,6 +217,8 @@ class Sports247Scraper:
         self.driver = driver
         self.logger = logger or log
 
+
+    @timed()
     def search_player_profile(self, player_name: str) -> PlayerSearchResult:
         """
         Search for a player profile on 247Sports and return the first matching result.

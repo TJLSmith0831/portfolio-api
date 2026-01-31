@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock
 
-from app.scrapers.sports247_scraper import Sports247Scraper, PlaywrightElement
+from app.utils.scrapers.sports247_scraper import Sports247Scraper, PlaywrightElement
 from app.models.player_fit_models import PlayerSearchResult
 
 

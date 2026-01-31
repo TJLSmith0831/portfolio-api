@@ -124,7 +124,7 @@ def fetch_website_contents(driver, url: str) -> str:
 
 if __name__ == "__main__":
     from playwright.sync_api import sync_playwright
-    from app.scrapers.sports247_scraper import PlaywrightDriver
+    from app.utils.scrapers.sports247_scraper import PlaywrightDriver
 
     logging.basicConfig(
         level=logging.INFO,

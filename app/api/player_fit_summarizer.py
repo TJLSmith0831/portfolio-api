@@ -18,8 +18,9 @@ from app.models.player_fit_models import (
     PlayerFitSummaryResponse,
     RelevantInfoResponse,
 )
-from app.scrapers.playwright_helpers import fetch_website_contents
-from app.scrapers.sports247_scraper import Sports247Scraper, PlaywrightDriver
+from app.utils.decorators import timed
+from app.utils.scrapers.playwright_helpers import fetch_website_contents
+from app.utils.scrapers.sports247_scraper import Sports247Scraper, PlaywrightDriver
 from app.llm_client import OllamaModels, get_llm_client, LLMClient
 
 logging.basicConfig(
@@ -303,10 +304,11 @@ class PlayerFitSummarizer:
 
         Player profile information:
         {request.player_profile.model_dump_json(indent=2)}
-        
+
         Evaluate scheme fit, roster impact, development trajectory, and risks.
         """
 
+    @timed()
     def select_relevant_information(
         self,
         driver: PlaywrightDriver,
@@ -328,6 +330,7 @@ class PlayerFitSummarizer:
 
         return RelevantInfoResponse(**parsed_json)
 
+    @timed()
     def summarizer_player_fit(
         self,
         player_name: str,
