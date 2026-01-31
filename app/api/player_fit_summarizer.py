@@ -19,6 +19,7 @@ from app.models.player_fit_models import (
     RelevantInfoResponse,
 )
 from app.utils.decorators import timed
+from app.utils.scrapers.driver_singleton import get_driver, driver_lock
 from app.utils.scrapers.playwright_helpers import fetch_website_contents
 from app.utils.scrapers.sports247_scraper import Sports247Scraper, PlaywrightDriver
 from app.llm_client import OllamaModels, get_llm_client, LLMClient
@@ -381,12 +382,12 @@ def summarize_player_fit(
     """
     Generate a structured player fit summary using Playwright.
     """
-    with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            args=["--no-sandbox", "--disable-gpu"],
-        )
-        page = browser.new_page()
+    
+    browser = get_driver()
+    
+    with driver_lock:
+        context = browser.new_context()
+        page = context.new_page()
         driver = PlaywrightDriver(page)
 
         client = LLMClient(model=model)
@@ -415,7 +416,7 @@ def summarize_player_fit(
             return PlayerFitSummaryResponse(summary=summary)
 
         finally:
-            browser.close()
+            context.close()
 
 # =========================
 # CLI entry point
