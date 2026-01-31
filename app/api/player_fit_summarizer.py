@@ -39,17 +39,6 @@ router = APIRouter(tags=["Summarize Player Fit"])
 # Helper functions
 # =========================
 
-def _extract_json(raw_text: str) -> dict:
-    """Extract JSON object from a string response."""
-    clean_string = re.sub(r"[ \t]+$", "", raw_text)
-    try:
-        return json.loads(clean_string)
-    except Exception as exc:
-        raise ValueError(
-            f"Failed to parse JSON. Raw text received was {raw_text}. Error details:\n{exc}"
-        )
-
-
 def _parse_json_lenient(text: str) -> dict:
     """
     Parse JSON from LLM output with basic repair logic.
@@ -185,24 +174,24 @@ def _normalize_player_fit_json(
 
 REL_INFO_SYSTEM_PROMPT = """
     You are given the raw textual contents of a college football player profile webpage.
-    
+
     Your task is to extract ONLY information that is explicitly and unambiguously stated
     verbatim in the provided text. You are performing factual information extraction,
     not analysis or inference.
-    
+
     CRITICAL RULE:
     Player position is a factual field.
     You may ONLY populate "identity.position" if the exact position label
     (e.g., "QB", "Quarterback", "Linebacker") appears explicitly in the text.
     Do NOT infer position from statistics, context, archetypes, or football knowledge.
     If no explicit position is present, set the value to null.
-    
+
     Focus on high-signal football information suitable for normalization into
     a structured player record.
     Ignore navigation elements, marketing copy, duplicated sections, and site boilerplate.
-    
+
     Prioritize extracting the following categories when explicitly present:
-    
+
     - Player identity (name, position, height, weight)
     - Current and former schools
     - Transfer portal or transfer prediction context when explicitly mentioned
@@ -211,12 +200,12 @@ REL_INFO_SYSTEM_PROMPT = """
     - Experience year / class
     - High school and hometown
     - Notable recent headlines (titles only)
-    
+
     Explicitly IGNORE:
     - Login prompts, subscription offers, ads
     - Navigation, footers, UI labels
     - Duplicated tables or repeated labels
-    
+
     Respond ONLY with valid JSON using the following structure:
 
     {
@@ -386,16 +375,13 @@ class PlayerFitSummarizer:
 # =========================
 
 @router.post("/summarize_player_fit", response_model=PlayerFitSummaryResponse)
-def summarize_player_fit(
-    request: PlayerFitSummaryRequest,
-    model: OllamaModels = OllamaModels.LLAMA_3B,
-) -> PlayerFitSummaryResponse:
+def summarize_player_fit(request: PlayerFitSummaryRequest) -> PlayerFitSummaryResponse:
     """
     Generate a structured player fit summary using Playwright.
     """
-    
+
     browser = get_driver()
-    
+
     with driver_lock:
         context = browser.new_context()
         page = context.new_page()

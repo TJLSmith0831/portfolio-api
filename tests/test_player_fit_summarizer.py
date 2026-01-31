@@ -34,11 +34,6 @@ class DummyClient:
         return DummyResponse(self._responses.pop(0))
 
 
-def test_extract_json_raises_when_no_json_found():
-    with pytest.raises(ValueError):
-        summarizer._extract_json("Completely invalid content without braces")
-
-
 def test_generate_with_retries_returns_on_first_success():
     client = DummyClient(['{"status": "ok"}'])
 
