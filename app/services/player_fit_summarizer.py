@@ -380,7 +380,7 @@ class PlayerFitSummarizer:
             "- Always justify the fit_score using evidence from the excerpt.\n"
             "- risk_factors must be an array. Use [] if none are identified.\n"
             "- Write scheme_fit, depth_chart_impact, and development_outlook as distinct paragraphs.\n"
-            "- overall_summary must be 3-5 sentences synthesizing the recommendation.\n"
+            "- overall_summary must be 2-3 sentences synthesizing the recommendation.\n"
             "- Output JSON only—no markdown, commentary, or extra keys.\n\n"
             "Template:\n"
             f"{PLAYER_FIT_JSON_TEMPLATE}\n"
