@@ -53,10 +53,10 @@ Add timing logs (measure before/after each change)
 
 Optional (big win)
 ------------------
-[ ] Collapse the two LLM calls into one (extract+fit in a single response) if still slow.
+[X] Collapse the two LLM calls into one (extract+fit in a single response) if still slow.
 [X] Rename ollama_client.py into llm_client.py.
 
 Done criteria
 -------------
-[ ] Run 5 warm requests and record median + p95 from logs.
-[ ] Confirm first request after restart is close to warm request time (warmup + keepalive working).
+[X] Run 5 warm requests and record median + p95 from logs.
+[X] Confirm first request after restart is close to warm request time (warmup + keepalive working).

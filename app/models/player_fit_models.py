@@ -3,11 +3,13 @@ from typing_extensions import List, Optional, Dict, Any, Union
 from pydantic import BaseModel, Field, HttpUrl
 
 class RelevantLink(BaseModel):
+    """A link to a relevant page about a player."""
     type: str = Field(..., description="Type of page (about, profile, news, etc.)")
     url: str = Field(..., description="Fully-qualified URL")
 
 
 class RelevantInfoResponse(BaseModel):
+    """Response containing relevant information about a player."""
     identity: Optional[Dict[str, Any]] = None
     school_context: Optional[Dict[str, Any]] = None
     rankings: Optional[Dict[str, Any]] = None
@@ -18,6 +20,7 @@ class RelevantInfoResponse(BaseModel):
 
 
 class PlayerSearchResult(BaseModel):
+    """Player search result."""
     query: str
     found: bool
     profile_url: Optional[HttpUrl] = None
@@ -31,12 +34,14 @@ class PlayerSearchResult(BaseModel):
 
 
 class PlayerFitRequest(BaseModel):
+    """Player fit request."""
     player_name: str
     team_name: str
     player_profile: RelevantInfoResponse
 
 
 class PlayerFitSummary(BaseModel):
+    """Player fit summary."""
     player: str
     team: str
     position: str
@@ -68,8 +73,10 @@ class PlayerFitSummary(BaseModel):
         )
 
 class PlayerFitSummaryRequest(BaseModel):
+    """Player fit summary request."""
     player_name: str
     requested_team_name: str
 
 class PlayerFitSummaryResponse(BaseModel):
+    """Player fit summary response."""
     summary: PlayerFitSummary

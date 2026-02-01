@@ -2,7 +2,8 @@ import json
 import logging
 import sys
 from dataclasses import dataclass
-from typing import Iterable, Tuple
+from typing import Dict, Iterable, Tuple
+from typing_extensions import Optional
 
 from playwright.sync_api import sync_playwright
 
@@ -45,7 +46,18 @@ REQUIRED_TEXT_FIELDS = [
 
 
 def _parse_json_lenient(text: str) -> dict:
-    """Parse JSON from LLM output with extremely small repair logic."""
+    """
+    Attempt to parse a JSON object from LLM output with minimal repair logic.
+
+    The function first attempts strict JSON parsing. If parsing fails due to
+    unbalanced braces, it appends missing closing braces and retries.
+
+    :param text: Raw text returned by the language model.
+    :type text: str
+    :return: Parsed JSON object.
+    :rtype: dict
+    :raises json.JSONDecodeError: If parsing fails after repair attempts.
+    """
     text = text.strip()
 
     try:
@@ -70,7 +82,20 @@ def _chat_with_retries(
     max_retries: int = 2,
 ) -> dict:
     """
-    Execute a chat completion with light retry / JSON repair logic.
+    Execute a chat completion with retries and JSON repair handling.
+
+    This function submits a chat request to the LLM, attempts to parse the
+    response as JSON, and retries with a repair prompt if parsing fails.
+
+    :param client: LLM client instance.
+    :param model: Model identifier to use.
+    :param system: Optional system prompt.
+    :param messages: User/assistant message history.
+    :param max_retries: Maximum number of retry attempts.
+    :type max_retries: int
+    :return: Parsed JSON response from the model.
+    :rtype: dict
+    :raises RuntimeError: If all retry attempts fail.
     """
     last_error = None
 
@@ -125,7 +150,18 @@ def _normalize_player_fit_json(
     player_name: str,
     team_name: str,
 ) -> dict:
-    """Normalize the LLM response into a PlayerFitSummary-compatible dict."""
+    """
+    Normalize raw LLM output into a PlayerFitSummary-compatible payload.
+
+    This includes coercing types, normalizing risk factors, clamping the
+    fit score, and injecting player/team identifiers.
+
+    :param data: Raw JSON returned by the LLM.
+    :param player_name: Player name for attribution.
+    :param team_name: Team name for attribution.
+    :return: Normalized dictionary suitable for PlayerFitSummary.
+    :rtype: dict
+    """
     raw_risks = data.get("risk_factors") or []
     normalized_risks: list[str] = []
 
@@ -167,7 +203,15 @@ def _normalize_player_fit_json(
 
 def _extract_identity_and_profile(extracted_text: str) -> Tuple[dict[str, str], str]:
     """
-    Extract the structured identity snippet and cleaned main text from the page payload.
+    Extract structured identity metadata and profile text from scraped content.
+
+    The function detects identity and profile markers and splits the payload
+    accordingly, returning a key-value identity map and cleaned profile text.
+
+    :param extracted_text: Full scraped page text.
+    :type extracted_text: str
+    :return: Tuple of (identity_map, profile_text).
+    :rtype: tuple[dict[str, str], str]
     """
     marker_identity = "=== PLAYER IDENTITY ==="
     marker_profile = "=== PROFILE CONTENT ==="
@@ -205,7 +249,14 @@ def _build_relevant_info_response(
     identity_map: dict[str, str],
     profile_text: str,
 ) -> RelevantInfoResponse:
-    """Convert the scraped artifacts into a RelevantInfoResponse."""
+    """
+    Build a RelevantInfoResponse from scraped identity and profile text.
+
+    :param identity_map: Parsed identity metadata.
+    :param profile_text: Main profile text content.
+    :return: Structured RelevantInfoResponse object.
+    :rtype: RelevantInfoResponse
+    """
     identity_section = {
         "name": identity_map.get("Name"),
         "position": identity_map.get("Position"),
@@ -240,8 +291,11 @@ def _build_relevant_info_response(
 
 def _validate_player_fit_payload(data: dict) -> tuple[bool, list[str]]:
     """
-    Verify the LLM output satisfies the required schema and semantics.
-    Returns (is_valid, list_of_issues)
+    Validate the structure and semantic correctness of a player-fit payload.
+
+    :param data: Parsed JSON output from the LLM.
+    :return: Tuple of (is_valid, list_of_issues).
+    :rtype: tuple[bool, list[str]]
     """
     issues: list[str] = []
 
@@ -275,7 +329,17 @@ def _build_repair_prompt(
     player_name: str,
     team_name: str,
 ) -> str:
-    """Construct the follow-up prompt when fields are missing."""
+    """
+    Build a repair prompt to request missing or invalid fields from the LLM.
+
+    :param missing_reasons: List of validation failures.
+    :param structured_json: Structured profile context.
+    :param raw_excerpt: Raw source excerpt.
+    :param player_name: Player name.
+    :param team_name: Team name.
+    :return: Repair prompt text.
+    :rtype: str
+    """
     missing_bullets = "\n".join(f"- {reason}" for reason in missing_reasons)
 
     return (
@@ -302,7 +366,6 @@ def _build_repair_prompt(
 @dataclass(slots=True)
 class ScrapedProfile:
     """Container for the scraped content used by the summarizer."""
-
     relevant_info: RelevantInfoResponse
     structured_json: str
     raw_excerpt: str
@@ -312,6 +375,11 @@ class PlayerFitSummarizer:
     """Single-pass player fit summarization pipeline."""
 
     def __init__(self, client=None) -> None:
+        """
+        Initialize the PlayerFitSummarizer with an LLM client.
+
+        :param client: LLM client instance.
+        """
         self.client = client or get_llm_client()
         self.logger = log
 
@@ -324,6 +392,13 @@ class PlayerFitSummarizer:
         driver: PlaywrightDriver,
         profile_url: str,
     ) -> ScrapedProfile:
+        """
+        Scrape the profile page and extract relevant information.
+
+        :param driver: PlaywrightDriver instance.
+        :param profile_url: URL of the profile page.
+        :return: ScrapedProfile instance.
+        """
         page_payload = fetch_website_contents(driver, profile_url)
         identity_map, profile_text = _extract_identity_and_profile(page_payload)
 
@@ -365,7 +440,23 @@ class PlayerFitSummarizer:
         *,
         structured_json: str,
         raw_excerpt: str,
+        prompt_overrides: Optional[Dict[str, str]] = None,
     ) -> str:
+        """
+        Build the prompt for player fit analysis.
+
+        :param request: PlayerFitRequest instance.
+        :param structured_json: Structured JSON data.
+        :param raw_excerpt: Raw excerpt from the profile page.
+        :param prompt_overrides: Optional prompt overrides.
+        :return: Prompt string.
+        """
+        overrides = prompt_overrides or {}
+        
+        guardrails = "\n".join(
+            f"- {text}" for text in overrides.values()
+        )
+            
         return (
             "**Output valid JSON only.**\n\n"
             f"Player: {request.player_name}\n"
@@ -374,6 +465,7 @@ class PlayerFitSummarizer:
             f"{structured_json}\n\n"
             "Primary source excerpt (verbatim, truncated to 1800 chars):\n"
             f"{raw_excerpt}\n\n"
+            f"{guardrails}\n\n"
             "Instructions:\n"
             "- Populate every field in the template below with grounded analysis.\n"
             "- Do not repeat raw biographical facts unless they support the evaluation.\n"
@@ -397,6 +489,17 @@ class PlayerFitSummarizer:
         raw_excerpt: str,
         prompt_overrides: dict | None = None,
     ) -> dict:
+        """
+        Invoke the player fit model to generate a JSON response.
+
+        :param player_name: Player's name.
+        :param team_name: Team's name.
+        :param relevant_info: Relevant information about the player.
+        :param structured_json: Structured JSON data.
+        :param raw_excerpt: Raw excerpt from the profile page.
+        :param prompt_overrides: Optional prompt overrides.
+        :return: JSON response.
+        """
         prompt_overrides = prompt_overrides or {}
         
         request = PlayerFitRequest(
@@ -408,17 +511,8 @@ class PlayerFitSummarizer:
             request,
             structured_json=structured_json,
             raw_excerpt=raw_excerpt,
+            prompt_overrides=prompt_overrides
         )
-        
-        # ----------------------------
-        # APPLY PROMPT OVERRIDES
-        # ----------------------------
-        if prompt_overrides is not None:
-            override_block = "\n\nAdditional constraints:\n"
-            for override in prompt_overrides.values():
-                override_block += f"- {override}\n"
-    
-            base_prompt = f"{base_prompt}{override_block}"
 
         parsed_json = _chat_with_retries(
             client=self.client,
@@ -468,6 +562,11 @@ class PlayerFitSummarizer:
     ) -> RelevantInfoResponse:
         """
         Scrape the player profile and return structured information plus raw excerpt.
+        
+        :param driver: Playwright driver.
+        :param profile_url: Player's profile URL.
+        :param model: Ollama model.
+        :return: Structured information and raw excerpt.
         """
         scraped = self._scrape_profile(driver, profile_url)
         return scraped.relevant_info
@@ -483,11 +582,17 @@ class PlayerFitSummarizer:
     ) -> PlayerFitSummary:
         """
         Generate the full player-fit summary in a single LLM call with validation.
+        
+        :param player_name: Player's name.
+        :param team_name: Team's name.
+        :param player_profile: Player's profile information.
+        :param model: Ollama model.
+        :param prompt_overrides: Prompt overrides.
+        :return: Player-fit summary.
         """
         if not player_profile:
             raise ValueError("player_profile is required for summarizer_player_fit")
             
-        
         prompt_overrides = prompt_overrides or {}
 
         background = player_profile.background or {}

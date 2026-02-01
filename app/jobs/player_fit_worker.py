@@ -12,6 +12,26 @@ from app.utils.scrapers.sports247_scraper import Sports247Scraper, PlaywrightDri
 from app.llm_client import get_llm_client
 from app.services.player_fit_summarizer import PlayerFitSummarizer
 
+FINAL_PRODUCTION_OVERRIDES = {
+    "program_guardrail": (
+        "Evaluate the player strictly through the lens of how they would fit within "
+        "the requested program’s system, roster composition, and development environment. "
+        "Avoid generic program praise or national narratives."
+    ),
+    "recruiter_voice": (
+        "Write in the tone of an internal college recruiting evaluation. "
+        "Be measured, realistic, and specific. Avoid promotional or marketing language."
+    ),
+    "score_calibration": (
+        "Use the full fit_score range conservatively. "
+        "Only assign scores above 85 for exceptional, low-risk fits. "
+        "Developmental or depth candidates should typically fall between 60–75."
+    ),
+    "anti_extraction": (
+        "Do not quote rankings, menu text, page headers, or scraped artifacts. "
+        "Base analysis only on inferred traits and context."
+    ),
+}
 
 def process_player_fit_job(job_id: str) -> None:
     """
@@ -67,7 +87,8 @@ def process_player_fit_job(job_id: str) -> None:
                     player_name=payload["player_name"],
                     team_name=payload["requested_team_name"],
                     player_profile=relevant_info,
-                    model=model
+                    model=model,
+                    prompt_overrides=FINAL_PRODUCTION_OVERRIDES
                 )
 
                 job_store.complete_job(job_id, summary.model_dump())
