@@ -6,12 +6,11 @@ from app.jobs.redis_store import RedisJobStore
 from app.models.redis_models import JobStatusResponse
 from app.utils.redis_client import get_redis_client
 
-
 from app.api.chat import router as chat_router
 from app.api.summarize_player_fit import router as player_fit_router
 from app.utils.scrapers.driver_singleton import get_driver
 
-VERSION = '0.1.0'
+VERSION = '1.0.0'
 
 app = FastAPI(
     title="Portfolio API",
