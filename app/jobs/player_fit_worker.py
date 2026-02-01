@@ -15,15 +15,16 @@ from app.services.player_fit_summarizer import PlayerFitSummarizer
 
 def process_player_fit_job(job_id: str) -> None:
     """
-    Execute a Player Fit Summarization job.
+    Process a player fit summarization job using the given job ID.
 
-    This function:
-    - Updates job status
-    - Scrapes the player profile
-    - Calls the LLM
-    - Stores the final result or error
+    This function handles the entire lifecycle of processing a player fit summarization:
+    - Updates the job status in Redis (queued, running, completed, failed)
+    - Uses a web scraper to obtain player profile data
+    - Uses the LLM client to generate summarization output
+    - Saves the results or error back to Redis
 
-    :param job_id: Redis job identifier
+    :param job_id: The unique identifier of the job in Redis
+    :return: None
     """
     redis_client = get_redis_client()
     job_store = RedisJobStore(redis_client)

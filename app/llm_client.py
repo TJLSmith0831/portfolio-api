@@ -17,10 +17,9 @@ from openai import OpenAI
 
 class OllamaModels(enum.Enum):
     """
-    This `OllamaModels` enum provides a set of predefined model names that
-    can be used with the Ollama client. Each member of the enum is associated
-    with a specific model identifier as it might be recognized by the Ollama
-    server.
+    Enum of predefined Ollama model names.
+
+    Each member corresponds to a model identifier used by the Ollama server.
     """
     LLAMA_3B='llama3.2:3b'
     LLAMA_1B='llama3.2:1b'
@@ -30,19 +29,19 @@ class LLMClient:
     """
     Thin wrapper around the Ollama Python SDK.
 
-    The wrapper simply forwards calls to the SDK, allowing the
-    rest of the application to remain agnostic of the SDK’s
-    concrete API shape.
+    This class forwards calls to the Ollama SDK client,
+    abstracting the underlying SDK interface.
+
+    :param model: Ollama model to use (default is OllamaModels.LLAMA_1B)
+    :param host: Optional host URL for the Ollama server
     """
 
     def __init__(self, model: OllamaModels = OllamaModels.LLAMA_1B, host: str | None = None) -> None:
         """
-        Configure the SDK host.
+        Initialize the LLM client with optional model and host.
 
-        :param model: Optional Ollama model name (e.g., "llama3.2").
-                      If omitted, the SDK uses its default.
-        :param host: Optional Ollama host URL (e.g., "http://localhost:11434").
-                     If omitted, the SDK uses its default.
+        :param model: Model enum to use for LLM requests.
+        :param host: Optional Ollama host URL to override environment setting.
         """
         if host:
             # The SDK reads the host from the ``OLLAMA_HOST`` environment
@@ -60,11 +59,21 @@ class LLMClient:
     # Direct SDK passthroughs
     # --------------------------------------------------------------------- #
     def list_models(self) -> Any:
-        """Return the raw response from ``client.models.list()``."""
+        """
+        List available LLM models from the Ollama server.
+
+        :return: Raw response from the SDK models list call.
+        """
         return self.client.models.list()
 
     def chat(self, *args: Any, **kwargs: Any) -> Any:
-        """Run a chat‑style completion."""
+        """
+        Create a chat completion from the LLM.
+
+        Accepts either one positional argument as the model name or model keyword argument.
+
+        :return: Chat completion response object.
+        """
         if len(args) > 0:
             if "model" in kwargs:
                 raise TypeError("chat() received model as both positional and keyword arguments.")
@@ -74,14 +83,22 @@ class LLMClient:
         return self.client.chat.completions.create(**kwargs)
 
     def embeddings(self, *args: Any, **kwargs: Any) -> Any:
-        """Generate embeddings for a prompt."""
+        """
+        Generate text embeddings.
+
+        :return: Embeddings response object.
+        """
         return self.client.embeddings.create(*args, **kwargs)
 
     # --------------------------------------------------------------------- #
     # Helper utilities
     # --------------------------------------------------------------------- #
     def is_ollama_running(self) -> bool:
-        """Check whether the Ollama server is reachable."""
+        """
+        Check if the Ollama backend server is running and reachable.
+
+        :return: True if server responds, False otherwise.
+        """
         try:
             self.client.models.list()
             return True
@@ -90,8 +107,12 @@ class LLMClient:
 
     def chat_with_tools(self, *args: Any, **kwargs: Any) -> Any:
         """
-        Send a chat request that may include tool calls.
-        Handles any returned tool_calls and feeds the result back.
+        Perform a chat completion that may include tool calls.
+
+        This method handles invoking any tools requested by the LLM
+        then continues the chat with tool results included.
+
+        :return: The updated chat completion including tool results.
         """
         response = self.chat(*args, **kwargs)
 
@@ -142,7 +163,11 @@ class LLMClient:
 
     def call_tool(self, name: Any, arguments: dict) -> str:
         """
-        Call a tool with the given name and arguments.
+        Call a tool identified by name with provided arguments.
+
+        :param name: Tool name to invoke
+        :param arguments: Arguments dictionary for the tool call
+        :return: Tool output as a string
         """
         return "I've used a tool!"
         # if name == "get_ticket_price":
@@ -161,6 +186,11 @@ _client_lock = threading.Lock()
 def get_llm_client() -> LLMClient:
     """
     Return a process-wide singleton LLMClient.
+
+    This function ensures that there is only one instance
+    of LLMClient in the process, initialized on demand.
+
+    :return: Singleton instance of LLMClient
     """
     global _client
 

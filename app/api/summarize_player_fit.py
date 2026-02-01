@@ -38,11 +38,15 @@ router = APIRouter(tags=["Summarize Player Fit"])
 def summarize_player_fit(request: PlayerFitSummaryRequest,
                          background_tasks: BackgroundTasks) -> JobEnqueueResponse:
     """
-    Enqueue a player fit summarization job and schedule background execution.
+    API endpoint to enqueue a player fit summarization job.
 
-    :param request: Player fit summarization request payload
-    :param background_tasks: FastAPI background task manager
-    :return: JobEnqueueResponse containing the job ID
+    This endpoint receives a request and enqueues a background job
+    to generate player fit summaries. It makes use of Redis for
+    job queuing and FastAPI's background tasks to run the job.
+
+    :param request: PlayerFitSummaryRequest payload containing player information.
+    :param background_tasks: FastAPI BackgroundTasks instance to schedule async job execution.
+    :return: JobEnqueueResponse with the enqueued job_id.
     """
     job_store = RedisJobStore(get_redis_client())
 
@@ -56,4 +60,3 @@ def summarize_player_fit(request: PlayerFitSummaryRequest,
     background_tasks.add_task(process_player_fit_job, job_id)
 
     return JobEnqueueResponse(job_id=job_id)
-

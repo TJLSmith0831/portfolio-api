@@ -37,14 +37,29 @@ app.include_router(player_fit_router)
 
 @app.get("/")
 def read_root():
+    """
+    Root endpoint providing a welcome message.
+
+    :return: A JSON object containing a welcome message.
+    """
     return {"message": "Hello from Tristan Smith! Welcome to my portfolio API hosted on DigitalOcean!"}
 
 @app.get("/health")
 def read_health():
+    """
+    Health check endpoint returning status 'ok'.
+
+    :return: A JSON object with the current health status.
+    """
     return {"status": "ok"}
 
 @app.get("/version")
 def read_version():
+    """
+    Endpoint to retrieve the current API version.
+
+    :return: A JSON object containing the version string.
+    """
     return {"version": VERSION}
 
 @app.get("/favicon.ico", include_in_schema=False)
