@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -e
 
+MODEL="llama3.2:1b"
+
 echo "Starting Ollama server..."
 ollama serve > /tmp/ollama.log 2>&1 &
 
@@ -12,8 +14,8 @@ for i in {1..60}; do
   sleep 1
 done
 
-echo "Ollama is ready. Ensuring model is present..."
-ollama list | grep -q "llama3.2:1b" || ollama pull llama3.2:1b
+echo "Ollama is ready. Ensuring $MODEL model is present..."
+ollama list | grep -q "$MODEL" || ollama pull "$MODEL"
 
 echo "Starting FastAPI (uvicorn)..."
 exec uv run uvicorn app.main:app \

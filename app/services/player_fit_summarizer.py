@@ -87,7 +87,7 @@ def _chat_with_retries(
                 model=model,
                 messages=chat_messages,
                 temperature=0,
-                max_tokens=650,
+                max_tokens=400,
             )
         except Exception as exc:  # pragma: no cover - network failures
             last_error = exc

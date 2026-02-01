@@ -26,6 +26,7 @@ app.add_middleware(
         "https://tjlsmith0831.dev",
         "https://www.tjlsmith0831.dev",
     ],
+    allow_origin_regex=r"https://.*\.tjlsmith0831s-projects\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
