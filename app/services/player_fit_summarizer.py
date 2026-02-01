@@ -378,6 +378,7 @@ class PlayerFitSummarizer:
             "- Populate every field in the template below with grounded analysis.\n"
             "- Do not repeat raw biographical facts unless they support the evaluation.\n"
             "- Always justify the fit_score using evidence from the excerpt.\n"
+            "\t- Use a conservative scale (average ~72; 90+ is rare).\n"
             "- risk_factors must be an array. Use [] if none are identified.\n"
             "- Write scheme_fit, depth_chart_impact, and development_outlook as distinct paragraphs.\n"
             "- overall_summary must be 2-3 sentences synthesizing the recommendation.\n"
