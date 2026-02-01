@@ -62,7 +62,7 @@ def process_player_fit_job(job_id: str) -> None:
                     model=model
                 )
 
-                summary = summarizer.summarizer_player_fit(
+                summary = summarizer.summarize_player_fit(
                     player_name=payload["player_name"],
                     team_name=payload["requested_team_name"],
                     player_profile=relevant_info,

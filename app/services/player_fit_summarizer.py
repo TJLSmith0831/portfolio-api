@@ -395,7 +395,10 @@ class PlayerFitSummarizer:
         relevant_info: RelevantInfoResponse,
         structured_json: str,
         raw_excerpt: str,
+        prompt_overrides: dict | None = None,
     ) -> dict:
+        prompt_overrides = prompt_overrides or {}
+        
         request = PlayerFitRequest(
             player_name=player_name,
             team_name=team_name,
@@ -406,6 +409,16 @@ class PlayerFitSummarizer:
             structured_json=structured_json,
             raw_excerpt=raw_excerpt,
         )
+        
+        # ----------------------------
+        # APPLY PROMPT OVERRIDES
+        # ----------------------------
+        if prompt_overrides is not None:
+            override_block = "\n\nAdditional constraints:\n"
+            for override in prompt_overrides.values():
+                override_block += f"- {override}\n"
+    
+            base_prompt = f"{base_prompt}{override_block}"
 
         parsed_json = _chat_with_retries(
             client=self.client,
@@ -460,18 +473,22 @@ class PlayerFitSummarizer:
         return scraped.relevant_info
 
     @timed()
-    def summarizer_player_fit(
+    def summarize_player_fit(
         self,
         player_name: str,
         team_name: str,
         player_profile: RelevantInfoResponse | None,
         model: OllamaModels = OllamaModels.LLAMA_1B,
+        prompt_overrides: dict | None = None,
     ) -> PlayerFitSummary:
         """
         Generate the full player-fit summary in a single LLM call with validation.
         """
         if not player_profile:
             raise ValueError("player_profile is required for summarizer_player_fit")
+            
+        
+        prompt_overrides = prompt_overrides or {}
 
         background = player_profile.background or {}
         raw_excerpt = player_profile.raw_text or background.get("profile_text", "")
@@ -487,6 +504,7 @@ class PlayerFitSummarizer:
             relevant_info=player_profile,
             structured_json=structured_json,
             raw_excerpt=raw_excerpt[:1800],
+            prompt_overrides=prompt_overrides,  # ← NEW
         )
 
         normalized = _normalize_player_fit_json(
@@ -533,7 +551,7 @@ if __name__ == "__main__":
                 profile_url=str(search_result.profile_url),
             )
 
-            summary = summarizer.summarizer_player_fit(
+            summary = summarizer.summarize_player_fit(
                 player_name=player_name,
                 team_name=team_name,
                 player_profile=relevant_info,
