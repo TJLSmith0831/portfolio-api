@@ -1,3 +1,4 @@
+from typing import Any
 import pytest
 
 from app.services import player_fit_summarizer as summarizer
@@ -27,7 +28,7 @@ class DummyResponse:
 class DummyClient:
     def __init__(self, responses) -> None:
         self._responses = list(responses)
-        self.calls = []
+        self.calls: list[dict[str, Any]] = []
 
     def chat(self, **kwargs):
         self.calls.append(kwargs)
