@@ -61,10 +61,12 @@ def test_generate_with_retries_returns_on_first_success():
 
 
 def test_generate_with_retries_retries_and_repairs_prompt():
-    client = DummyClient([
-        "not json",
-        '{"fixed": true}',
-    ])
+    client = DummyClient(
+        [
+            "not json",
+            '{"fixed": true}',
+        ]
+    )
 
     output = _chat_with_retries(
         client=client,
@@ -128,10 +130,12 @@ def test_build_relevant_info_response_populates_background():
 
 
 def test_generate_with_retries_raises_after_exhausting_attempts():
-    client = DummyClient([
-        "still not json",
-        "also not json",
-    ])
+    client = DummyClient(
+        [
+            "still not json",
+            "also not json",
+        ]
+    )
 
     with pytest.raises(RuntimeError) as exc_info:
         _chat_with_retries(
@@ -166,7 +170,11 @@ def test_get_player_fit_prompt_includes_request_details():
     )
 
     # Alternative solution:
-    raw_excerpt = request.player_profile.background.get("profile_text", "") if request.player_profile.background else ""
+    raw_excerpt = (
+        request.player_profile.background.get("profile_text", "")
+        if request.player_profile.background
+        else ""
+    )
 
     prompt = summarizer_object._build_player_fit_prompt(
         request,
@@ -180,7 +188,10 @@ def test_get_player_fit_prompt_includes_request_details():
     assert "Example College" in prompt
     assert "Structured profile data (scraped context summarized below):" in prompt
     assert expected_json in prompt
-    assert "Primary source excerpt (verbatim, truncated to 1800 chars):" in prompt
+    assert (
+        "Output valid JSON only. No markdown, no code fences, no extra keys, no commentary."
+        in prompt
+    )
     assert "Line one.\nLine two." in prompt
-    assert 'Player: Jane Doe' in prompt
-    assert 'Team: Example College' in prompt
+    assert "Player: Jane Doe" in prompt
+    assert "Team: Example College" in prompt

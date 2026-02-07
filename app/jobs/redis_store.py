@@ -9,6 +9,7 @@ Jobs are stored in Redis as JSON blobs under deterministic keys and are intended
 to be consumed by background workers or task processors.
 """
 
+import hashlib
 import json
 import uuid
 from enum import Enum
@@ -29,6 +30,14 @@ class JobStatus(str, Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+# Redis list key for the dedicated worker to poll (BLPOP)
+PLAYER_FIT_QUEUE_KEY = "queue:player_fit"
+
+# Cache key prefix for completed player-fit results (player_name + team_name)
+PLAYER_FIT_CACHE_PREFIX = "player_fit_cache:"
+PLAYER_FIT_CACHE_TTL_SECONDS = 86400  # 24 hours
 
 
 class RedisJobStore:
@@ -87,6 +96,47 @@ class RedisJobStore:
 
         self.redis.set(self._key(job_id), json.dumps(job))
         return job_id
+
+    def enqueue_for_processing(self, job_id: str, queue_key: str = PLAYER_FIT_QUEUE_KEY) -> None:
+        """
+        Push a job ID onto the given queue for a dedicated worker to process.
+
+        :param job_id: Job ID to enqueue.
+        :param queue_key: Redis list key (default: PLAYER_FIT_QUEUE_KEY).
+        """
+        self.redis.lpush(queue_key, job_id)
+
+    def _player_fit_cache_key(self, player_name: str, team_name: str) -> str:
+        raw = f"{player_name.strip()}|{team_name.strip()}"
+        h = hashlib.sha256(raw.encode()).hexdigest()
+        return f"{PLAYER_FIT_CACHE_PREFIX}{h}"
+
+    def get_cached_player_fit(
+        self,
+        player_name: str,
+        requested_team_name: str,
+    ) -> dict | None:
+        """
+        Return a cached completed result for (player_name, requested_team_name), or None.
+        """
+        key = self._player_fit_cache_key(player_name, requested_team_name)
+        raw = self.redis.get(key)
+        if raw is None:
+            return None
+        return json.loads(raw)
+
+    def set_cached_player_fit(
+        self,
+        player_name: str,
+        requested_team_name: str,
+        result: dict,
+        ttl_seconds: int = PLAYER_FIT_CACHE_TTL_SECONDS,
+    ) -> None:
+        """
+        Store a completed player-fit result for (player_name, requested_team_name).
+        """
+        key = self._player_fit_cache_key(player_name, requested_team_name)
+        self.redis.setex(key, ttl_seconds, json.dumps(result))
 
     def get_job(self, job_id: str) -> dict:
         """

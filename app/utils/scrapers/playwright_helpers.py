@@ -304,7 +304,7 @@ def fetch_website_contents(driver, url: str) -> str:
     combined = "\n\n".join(parts)
     log.info("Final extracted payload size: %d chars", len(combined))
 
-    return combined[:1800]
+    return combined[:1200]
 
 
 if __name__ == "__main__":

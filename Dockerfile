@@ -46,10 +46,12 @@ RUN uv run playwright install chromium
 # Copy application code
 COPY . .
 
-# Ollama runtime configuration
+# Ollama runtime configuration (tuned for 2 vCPU / 4 GB droplet)
 ENV OLLAMA_KEEP_ALIVE=10m \
     OLLAMA_NUM_PARALLEL=1 \
-    OLLAMA_MAX_LOADED_MODELS=1
+    OLLAMA_MAX_LOADED_MODELS=1 \
+    OLLAMA_NUM_CTX=2048 \
+    OLLAMA_NUM_THREAD=2
 
 # Entrypoint script
 COPY app/entrypoint.sh /app/entrypoint.sh

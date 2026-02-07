@@ -92,6 +92,11 @@ def process_player_fit_job(job_id: str) -> None:
                 )
 
                 job_store.complete_job(job_id, summary.model_dump())
+                job_store.set_cached_player_fit(
+                    payload["player_name"],
+                    payload["requested_team_name"],
+                    summary.model_dump(),
+                )
 
             finally:
                 context.close()

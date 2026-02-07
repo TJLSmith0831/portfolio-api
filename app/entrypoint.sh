@@ -17,6 +17,12 @@ done
 echo "Ollama is ready. Ensuring $MODEL model is present..."
 ollama list | grep -q "$MODEL" || ollama pull "$MODEL"
 
+echo "Warming model (load into RAM)..."
+ollama run "$MODEL" "OK" || true
+
+echo "Starting player-fit worker (background)..."
+uv run python -m app.jobs.run_worker &
+
 echo "Starting FastAPI (uvicorn)..."
 exec uv run uvicorn app.main:app \
   --host 0.0.0.0 \

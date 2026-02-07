@@ -23,6 +23,9 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
+# Cap excerpt length sent to the LLM (reduces tokens / memory on small droplets)
+EXCERPT_MAX_CHARS = 1200
+
 PLAYER_FIT_JSON_TEMPLATE = """{
   "position": "string",
   "fit_score": number (0-100),
@@ -130,9 +133,9 @@ def _chat_with_retries(
 
             repair_prompt = (
                 "The previous response was not valid JSON.\n\n"
-                "Return ONLY a complete JSON object that matches this template:\n"
+                "Return ONLY a complete JSON object that matches this template. "
+                "No markdown, no code fences, no comments, no extra keys.\n\n"
                 f"{PLAYER_FIT_JSON_TEMPLATE}\n\n"
-                "Do not include markdown, comments, or explanations.\n"
                 "Use null only when information is truly absent.\n\n"
                 f"Previous response:\n{raw_text}"
             )
@@ -243,6 +246,26 @@ def _extract_identity_and_profile(extracted_text: str) -> Tuple[dict[str, str], 
 
     profile_text = profile_block.strip() or extracted_text.strip()
     return identity_map, profile_text
+
+
+def _trim_structured_for_prompt(
+    relevant_info: RelevantInfoResponse,
+    raw_excerpt: str,
+    *,
+    profile_snippet_chars: int = 600,
+) -> str:
+    """
+    Build a minimal JSON string for the LLM prompt (identity, school, short excerpt).
+    Reduces token count while keeping behavior consistent.
+    """
+    trimmed: Dict[str, object] = {}
+    if relevant_info.identity:
+        trimmed["identity"] = relevant_info.identity
+    if relevant_info.school_context:
+        trimmed["school_context"] = relevant_info.school_context
+    if raw_excerpt:
+        trimmed["profile_excerpt"] = raw_excerpt[:profile_snippet_chars]
+    return json.dumps(trimmed, indent=2)
 
 
 def _build_relevant_info_response(
@@ -415,7 +438,7 @@ class PlayerFitSummarizer:
             indent=2,
             exclude_none=True,
         )
-        raw_excerpt = (relevant_info.raw_text or "")[:1800]
+        raw_excerpt = (relevant_info.raw_text or "")[:EXCERPT_MAX_CHARS]
 
         background = dict(relevant_info.background or {})
         if raw_excerpt and not background.get("profile_text"):
@@ -458,23 +481,23 @@ class PlayerFitSummarizer:
         )
             
         return (
-            "**Output valid JSON only.**\n\n"
+            "Output valid JSON only. No markdown, no code fences, no extra keys, no commentary.\n\n"
             f"Player: {request.player_name}\n"
             f"Team: {request.team_name}\n\n"
             "Structured profile data (scraped context summarized below):\n"
             f"{structured_json}\n\n"
-            "Primary source excerpt (verbatim, truncated to 1800 chars):\n"
+            "Primary source excerpt (verbatim, truncated to 1200 chars):\n"
             f"{raw_excerpt}\n\n"
             f"{guardrails}\n\n"
             "Instructions:\n"
             "- Populate every field in the template below with grounded analysis.\n"
             "- Do not repeat raw biographical facts unless they support the evaluation.\n"
-            "- Always justify the fit_score using evidence from the excerpt. Use a conservative scale (average ~72; 90+ is rare)\n"
+            "- Always justify the fit_score using evidence from the excerpt. Use a conservative scale (average ~72; 90+ is rare).\n"
             "- risk_factors must be an array. Use [] if none are identified.\n"
             "- Write scheme_fit, depth_chart_impact, and development_outlook as distinct paragraphs, "
             f"explicitly tied to {request.team_name}'s program identity, roster context, and development philosophy.\n"
             f"- overall_summary must be 2-3 sentences synthesizing the recommendation relative to {request.team_name}'s program.\n"
-            "- Output JSON only—no markdown, commentary, or extra keys.\n\n"
+            "- Return only the JSON object. No markdown, no ```json, no explanation, no extra keys beyond the template.\n\n"
             "Template:\n"
             f"{PLAYER_FIT_JSON_TEMPLATE}\n"
         )
@@ -501,7 +524,8 @@ class PlayerFitSummarizer:
         :return: JSON response.
         """
         prompt_overrides = prompt_overrides or {}
-        
+        trimmed_json = _trim_structured_for_prompt(relevant_info, raw_excerpt)
+
         request = PlayerFitRequest(
             player_name=player_name,
             team_name=team_name,
@@ -509,7 +533,7 @@ class PlayerFitSummarizer:
         )
         base_prompt = self._build_player_fit_prompt(
             request,
-            structured_json=structured_json,
+            structured_json=trimmed_json,
             raw_excerpt=raw_excerpt,
             prompt_overrides=prompt_overrides
         )
@@ -517,9 +541,9 @@ class PlayerFitSummarizer:
         parsed_json = _chat_with_retries(
             client=self.client,
             model=self.client.model_enum.value,
-            system="You are an elite college football recruiting analyst.",
+            system="You are an elite college football recruiting analyst. Output only valid JSON.",
             messages=[{"role": "user", "content": base_prompt}],
-            max_retries=1,
+            max_retries=0,
         )
 
         valid, issues = _validate_player_fit_payload(parsed_json)
@@ -542,9 +566,9 @@ class PlayerFitSummarizer:
         repaired_json = _chat_with_retries(
             client=self.client,
             model=self.client.model_enum.value,
-            system="You are an elite college football recruiting analyst.",
+            system="You are an elite college football recruiting analyst. Output only valid JSON.",
             messages=[{"role": "user", "content": repair_prompt}],
-            max_retries=1,
+            max_retries=0,
         )
 
         return repaired_json
@@ -608,8 +632,8 @@ class PlayerFitSummarizer:
             team_name=team_name,
             relevant_info=player_profile,
             structured_json=structured_json,
-            raw_excerpt=raw_excerpt[:1800],
-            prompt_overrides=prompt_overrides,  # ← NEW
+            raw_excerpt=raw_excerpt[:EXCERPT_MAX_CHARS],
+            prompt_overrides=prompt_overrides,
         )
 
         normalized = _normalize_player_fit_json(
