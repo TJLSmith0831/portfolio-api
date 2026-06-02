@@ -582,7 +582,7 @@ class PlayerFitSummarizer:
         self,
         driver: PlaywrightDriver,
         profile_url: str,
-        model: OllamaModels = OllamaModels.LLAMA_1B,  # retained for compatibility
+        model: OllamaModels = OllamaModels.GEMMA4_31B,  # retained for compatibility
     ) -> RelevantInfoResponse:
         """
         Scrape the player profile and return structured information plus raw excerpt.
@@ -601,7 +601,7 @@ class PlayerFitSummarizer:
         player_name: str,
         team_name: str,
         player_profile: RelevantInfoResponse | None,
-        model: OllamaModels = OllamaModels.LLAMA_1B,
+        model: OllamaModels = OllamaModels.GEMMA4_31B,
         prompt_overrides: dict | None = None,
     ) -> PlayerFitSummary:
         """

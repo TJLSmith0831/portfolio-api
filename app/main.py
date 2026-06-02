@@ -7,6 +7,7 @@ from app.models.redis_models import JobStatusResponse
 from app.utils.redis_client import get_redis_client
 
 from app.api.chat import router as chat_router
+from app.api.sirenspec import router as sirenspec_router
 from app.api.summarize_player_fit import router as player_fit_router
 from app.utils.scrapers.driver_singleton import get_driver
 
@@ -33,6 +34,7 @@ app.add_middleware(
 
 app.include_router(chat_router)
 app.include_router(player_fit_router)
+app.include_router(sirenspec_router)
 
 @app.get("/")
 def read_root():

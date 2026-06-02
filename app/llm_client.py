@@ -21,8 +21,7 @@ class OllamaModels(enum.Enum):
 
     Each member corresponds to a model identifier used by the Ollama server.
     """
-    LLAMA_3B='llama3.2:3b'
-    LLAMA_1B='llama3.2:1b'
+    GEMMA4_31B='gemma4:31b'
 
 
 class LLMClient:
@@ -36,7 +35,7 @@ class LLMClient:
     :param host: Optional host URL for the Ollama server
     """
 
-    def __init__(self, model: OllamaModels = OllamaModels.LLAMA_1B, host: str | None = None) -> None:
+    def __init__(self, model: OllamaModels = OllamaModels.GEMMA4_31B, host: str | None = None) -> None:
         """
         Initialize the LLM client with optional model and host.
 
@@ -48,9 +47,11 @@ class LLMClient:
             # variable, so we set it here.
             os.environ["OLLAMA_HOST"] = host
 
+        base_url = os.getenv("OLLAMA_BASE_URL", "https://ollama.com/v1")
+        api_key = os.getenv("OLLAMA_API_KEY", "ollama")
         self.client = OpenAI(
-            base_url="http://localhost:11434/v1",
-            api_key="ollama",
+            base_url=base_url,
+            api_key=api_key,
         )
         self.model_enum = model
         self.model_name = model.value
@@ -197,7 +198,7 @@ def get_llm_client() -> LLMClient:
     if _client is None:
         with _client_lock:
             if _client is None:
-                model_name = os.getenv("OLLAMA_MODEL", "LLAMA_1B")
+                model_name = os.getenv("OLLAMA_MODEL", "GEMMA4_31B")
 
                 if model_name:
                     try:
@@ -208,7 +209,7 @@ def get_llm_client() -> LLMClient:
                             f"Valid values: {[m.name for m in OllamaModels]}"
                         ) from exc
                 else:
-                    model_enum = OllamaModels.LLAMA_1B
+                    model_enum = OllamaModels.GEMMA4_31B
 
                 _client = LLMClient(model=model_enum)
 
@@ -220,9 +221,9 @@ if __name__ == "__main__":
     client = LLMClient()
     print(client.is_ollama_running())
     test_prompt = "Hello, world!"
-    print(f"Testing '{OllamaModels.LLAMA_3B.value}' model with: '{test_prompt}'")
+    print(f"Testing '{OllamaModels.GEMMA4_31B.value}' model with: '{test_prompt}'")
     response = client.chat(
-        model=OllamaModels.LLAMA_3B.value,
+        model=OllamaModels.GEMMA4_31B.value,
         messages=[{"role": "user", "content": test_prompt}],
     )
     print(response.choices[0].message.content)
