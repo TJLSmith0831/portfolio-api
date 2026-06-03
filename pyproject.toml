@@ -1,9 +1,9 @@
 [project]
 name = "portfolio-api"
-version = "0.2.0"
+version = "1.0.0"
 description = "API backend for portfolio using FastAPI and Ollama."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.110.0",
     "uvicorn[standard]>=0.29.0",
@@ -16,7 +16,8 @@ dependencies = [
     "playwright>=1.38.0",
     "webdriver-manager>=3.8.5",
     "urllib3>=1.26.15",
-    "redis>=5.0.0"
+    "redis>=5.0.0",
+    "sirenspec==0.1.2",
 ]
 
 [build-system]

@@ -57,6 +57,15 @@ htmlcov/
 .coverage.xml
 .coverage.json
 
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Caches
+*_cache/
+*_cache.*
+
 # Misc
 *.pyc
 *.pyo
