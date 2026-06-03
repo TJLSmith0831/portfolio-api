@@ -1,6 +1,6 @@
 [project]
 name = "portfolio-api"
-version = "0.2.0"
+version = "1.0.0"
 description = "API backend for portfolio using FastAPI and Ollama."
 readme = "README.md"
 requires-python = ">=3.11"
