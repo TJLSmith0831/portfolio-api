@@ -8,7 +8,7 @@ version: "0.1"
 
 agents:
   gradebook_compiler:
-    model: "anthropic:claude-haiku-4-5-20251001"
+    model: "openai:gpt-4o-mini"
     system: |
       You are an academic administrator compiling a final gradebook.
       Below are the individual grade reports for each paper submitted.
@@ -31,8 +31,8 @@ nodes:
       concurrency: 3
       agents:
         - id: editor
-          provider: anthropic
-          model: claude-haiku-4-5-20251001
+          provider: openai
+          model: gpt-4o-mini
           prompt: |
             You are a writing editor. Review the following student paper (paper {{ index }} of {{ total }})
             and provide brief feedback on clarity, structure, and grammar. Be concise — 2-3 sentences.
@@ -52,8 +52,8 @@ nodes:
             {{ item }}
 
         - id: grader
-          provider: anthropic
-          model: claude-haiku-4-5-20251001
+          provider: openai
+          model: gpt-4o-mini
           prompt: |
             You are a professor grading a student paper. Score paper {{ index }} of {{ total }}
             on a scale of A, B, C, D, or F. Return the letter grade on the first line,
@@ -63,8 +63,8 @@ nodes:
             {{ item }}
 
       synthesis:
-        provider: anthropic
-        model: claude-haiku-4-5-20251001
+        provider: openai
+        model: gpt-4o-mini
         prompt: |
           Produce a concise grade report for paper {{ index }} of {{ total }}.
 

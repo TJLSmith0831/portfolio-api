@@ -58,8 +58,20 @@ async def _run_and_store(job_id: str, runner: Callable[[], Awaitable[dict]]) -> 
 # =========================
 
 
+def _require_success(trace: dict) -> None:
+    """Raise RuntimeError if the SirenSpec workflow did not complete successfully."""
+    status = trace.get("summary", {}).get("status", "failed")
+    if status != "success":
+        error = next(
+            (n.get("error") for n in trace.get("nodes", []) if n.get("error")),
+            "Workflow failed without a specific error message",
+        )
+        raise RuntimeError(error)
+
+
 async def _execute_compression_gauntlet(text: str) -> dict:
     trace = await run_workflow("compression_gauntlet", text)
+    _require_success(trace)
     return shape_compression_gauntlet(trace, original_input=text).model_dump()
 
 
@@ -86,6 +98,7 @@ def compression_gauntlet(
 
 async def _execute_grading_factory(papers: list[str]) -> dict:
     trace = await run_workflow("grading_factory", papers)
+    _require_success(trace)
     return shape_grading_factory(trace, original_papers=papers).model_dump()
 
 

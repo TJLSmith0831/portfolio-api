@@ -143,7 +143,7 @@ async def run_pokemon_battle(request: PokemonBattleRequest) -> PokemonBattleResu
 
             summary = trace.get("summary") or {}
             total_tokens += int(summary.get("total_tokens") or 0)
-            total_duration_ms += float(summary.get("duration_ms") or 0.0)
+            total_duration_ms += float(summary.get("total_duration_ms") or 0.0)
 
         if not move or move not in allowed:
             move = random.choice(allowed)
