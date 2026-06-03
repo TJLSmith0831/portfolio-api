@@ -11,7 +11,7 @@ from app.api.sirenspec import router as sirenspec_router
 from app.api.summarize_player_fit import router as player_fit_router
 from app.utils.scrapers.driver_singleton import get_driver
 
-VERSION = '1.0.0'
+VERSION = "1.0.0"
 
 app = FastAPI(
     title="Portfolio API",
@@ -36,6 +36,7 @@ app.include_router(chat_router)
 app.include_router(player_fit_router)
 app.include_router(sirenspec_router)
 
+
 @app.get("/")
 def read_root():
     """
@@ -43,7 +44,8 @@ def read_root():
 
     :return: A JSON object containing a welcome message.
     """
-    return {"message": "Hello from Tristan Smith! Welcome to my portfolio API hosted on DigitalOcean!"}
+    return {"message": "Hello from Tristan Smith! Welcome to my portfolio API!"}
+
 
 @app.get("/health")
 def read_health():
@@ -54,6 +56,7 @@ def read_health():
     """
     return {"status": "ok"}
 
+
 @app.get("/version")
 def read_version():
     """
@@ -63,13 +66,16 @@ def read_version():
     """
     return {"version": VERSION}
 
+
 @app.get("/favicon.ico", include_in_schema=False)
 def favicon():
     return FileResponse("app/static/favicon.ico")
 
+
 # =========================
 # Job status endpoint
 # =========================
+
 
 @app.get("/jobs/{job_id}", response_model=JobStatusResponse)
 def get_job_status(job_id: str) -> JobStatusResponse:
